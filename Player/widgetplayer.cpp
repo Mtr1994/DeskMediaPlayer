@@ -95,6 +95,8 @@ void WidgetPlayer::paintGL()
     glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
+    if (mCurrentFrame.pts < 0) return;
+
     mShaderProgram.bind();
     mVertexBufferObject.bind();
     mShaderProgram.enableAttributeArray("vertexIn");
@@ -102,10 +104,12 @@ void WidgetPlayer::paintGL()
     mShaderProgram.setAttributeBuffer("vertexIn", GL_FLOAT, 0, 2, 2 * sizeof(GLfloat));
     mShaderProgram.setAttributeBuffer("textureIn", GL_FLOAT, 2 * 4 * sizeof(GLfloat), 2, 2 * sizeof(GLfloat));
 
+    std::unique_lock<std::mutex> lock(mMutexPlayFrame);
+
     glActiveTexture(GL_TEXTURE0);
     glBindTexture(GL_TEXTURE_2D, mTextureArray[0]);
-    glPixelStorei(GL_UNPACK_ROW_LENGTH, mCurrentFrame.linesizey);
-    glTexImage2D(GL_TEXTURE_2D, 0, GL_LUMINANCE, mCurrentFrame.width, mCurrentFrame.height, 0, GL_LUMINANCE, GL_UNSIGNED_BYTE, mCurrentFrame.y);
+    glPixelStorei(GL_UNPACK_ROW_LENGTH, mCurrentFrame.linesize1);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_LUMINANCE, mCurrentFrame.width1, mCurrentFrame.height1, 0, GL_LUMINANCE, GL_UNSIGNED_BYTE, mCurrentFrame.d1);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
@@ -113,8 +117,8 @@ void WidgetPlayer::paintGL()
 
     glActiveTexture(GL_TEXTURE1);
     glBindTexture(GL_TEXTURE_2D, mTextureArray[1]);
-    glPixelStorei(GL_UNPACK_ROW_LENGTH, mCurrentFrame.linesizeu);
-    glTexImage2D(GL_TEXTURE_2D, 0, GL_LUMINANCE, mCurrentFrame.width >> 1, mCurrentFrame.height >> 1, 0, GL_LUMINANCE, GL_UNSIGNED_BYTE, mCurrentFrame.u);
+    glPixelStorei(GL_UNPACK_ROW_LENGTH, mCurrentFrame.linesize2);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_LUMINANCE, mCurrentFrame.width2, mCurrentFrame.height2, 0, GL_LUMINANCE, GL_UNSIGNED_BYTE, mCurrentFrame.d2);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
@@ -122,12 +126,14 @@ void WidgetPlayer::paintGL()
 
     glActiveTexture(GL_TEXTURE2);
     glBindTexture(GL_TEXTURE_2D, mTextureArray[2]);
-    glPixelStorei(GL_UNPACK_ROW_LENGTH, mCurrentFrame.linesizev);
-    glTexImage2D(GL_TEXTURE_2D, 0, GL_LUMINANCE, mCurrentFrame.width >> 1, mCurrentFrame.height >> 1, 0, GL_LUMINANCE, GL_UNSIGNED_BYTE, mCurrentFrame.v);
+    glPixelStorei(GL_UNPACK_ROW_LENGTH, mCurrentFrame.linesize3);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_LUMINANCE, mCurrentFrame.width3, mCurrentFrame.height3, 0, GL_LUMINANCE, GL_UNSIGNED_BYTE, mCurrentFrame.d3);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+
+    lock.unlock();
 
     mShaderProgram.setUniformValue("textureY", 0);
     mShaderProgram.setUniformValue("textureU", 1);
@@ -270,8 +276,6 @@ void WidgetPlayer::parse(const QString &path)
                     continue;
                 }
 
-                SwsContext* pSwsCtx = nullptr;
-
                 while (ret >= 0)
                 {
                     ret = avcodec_receive_frame(codeCtxVideo, frame);
@@ -286,52 +290,52 @@ void WidgetPlayer::parse(const QString &path)
                         break;
                     }
 
-                    if (nullptr == pSwsCtx)
-                    {
-                        pSwsCtx = sws_getContext(codeCtxVideo->width, codeCtxVideo->height, (AVPixelFormat)frame->format, codeCtxVideo->width, codeCtxVideo->height, AV_PIX_FMT_YUV420P, SWS_BICUBIC, nullptr, nullptr, nullptr);
-                    }
-
                     frame->pts = frame->best_effort_timestamp;
 
                     int pixWidth = frame->width;
                     int pixHeight = frame->height;
 
-                    uint8_t *y = new uint8_t[frame->linesize[0] * pixHeight];
-                    uint8_t *u = new uint8_t[frame->linesize[0] * pixHeight / 4];
-                    uint8_t *v = new uint8_t[frame->linesize[0] * pixHeight / 4];
-                    uint8_t *data[AV_NUM_DATA_POINTERS] = { (uint8_t *)y, (uint8_t *)u, (uint8_t *)v };
-                    int ret = sws_scale(pSwsCtx, (uint8_t const * const *) frame->data, frame->linesize, 0, frame->height, data, frame->linesize);
-
-                    if (ret > 0)
+                    VideoFrame videoFrame = { frame->pts, pixWidth, pixHeight, sampleSize, 0, nullptr, 0, 0, 0, nullptr, 0, 0, 0, nullptr, 0, 0, 0 };
+                    if (frame->format == AV_PIX_FMT_YUV420P)
                     {
-                        VideoFrame videoFrame =
-                        {
-                            frame->pts,
-                            pixWidth,
-                            pixHeight,
-                            sampleSize,
-                            (double)codeCtxVideo->pkt_timebase.num / codeCtxVideo->pkt_timebase.den,
-                            y,
-                            frame->linesize[0],
-                            u,
-                            frame->linesize[1],
-                            v,
-                            frame->linesize[2]
-                        };
+                        uint8_t *d1 = new uint8_t[frame->linesize[0] * pixHeight];
+                        uint8_t *d2 = new uint8_t[frame->linesize[0] * pixHeight / 4];
+                        uint8_t *d3 = new uint8_t[frame->linesize[0] * pixHeight / 4];
 
-                        // 根据实际数量，动态修改等待时间
-                        size_t size = mQueueVideoFrame.size();
-                        milliseconds = (int)size * 100 * frame->pkt_duration * (double)codeCtxVideo->pkt_timebase.num / codeCtxVideo->pkt_timebase.den;
+                        memcpy(d1, frame->data[0], frame->linesize[0] * pixHeight);
+                        memcpy(d2, frame->data[1], frame->linesize[0] * pixHeight / 4);
+                        memcpy(d3, frame->data[2], frame->linesize[0] * pixHeight / 4);
 
-                        mQueueVideoFrame.push(videoFrame);
+                        videoFrame.timebase = (double)codeCtxVideo->pkt_timebase.num / codeCtxVideo->pkt_timebase.den;
 
-                        // 通知播放
-                        mCvPlayMedia.notify_all();
+                        videoFrame.d1 = d1;
+                        videoFrame.width1 = pixWidth;
+                        videoFrame.height1 = pixHeight;
+                        videoFrame.linesize1 = frame->linesize[0];
+
+                        videoFrame.d2 = d2;
+                        videoFrame.width2 = pixWidth / 2;
+                        videoFrame.height2 = pixHeight / 2;
+                        videoFrame.linesize2 = frame->linesize[1];
+
+                        videoFrame.d3 = d3;
+                        videoFrame.width3 = pixWidth / 2;
+                        videoFrame.height3 = pixHeight / 2;
+                        videoFrame.linesize3 = frame->linesize[2];
                     }
+
+                    // 根据实际数量，动态修改等待时间
+                    size_t size = mQueueVideoFrame.size();
+                    milliseconds = (int)size * 100 * frame->pkt_duration * (double)codeCtxVideo->pkt_timebase.num / codeCtxVideo->pkt_timebase.den;
+
+                    mQueueVideoFrame.push(videoFrame);
+
+                    // 通知播放
+                    mCvPlayMedia.notify_all();
+
                     av_frame_unref(frame);
                 }
                 av_packet_unref(packet);
-                sws_freeContext(pSwsCtx);
             }
             else if (packet->stream_index == audioStreamIndex)
             {
@@ -433,14 +437,16 @@ void WidgetPlayer::playVideoFrame()
         mVideoWidth = widthSize;
         mVideoHeight = heightSize;
 
+        std::unique_lock<std::mutex> lock(mMutexPlayFrame);
         if (mCurrentFrame.pts > 0)
         {
-            delete [] mCurrentFrame.y;
-            delete [] mCurrentFrame.u;
-            delete [] mCurrentFrame.v;
+            delete [] mCurrentFrame.d1;
+            delete [] mCurrentFrame.d2;
+            delete [] mCurrentFrame.d3;
         }
 
         mCurrentFrame = frame;
+        lock.unlock();
 
         emit sgl_thead_update_video_frame();
     }

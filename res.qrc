@@ -8,5 +8,6 @@
         <file>Resourse/image/play.svg</file>
         <file>Resourse/image/play_next.svg</file>
         <file>Resourse/image/play_previous.svg</file>
+        <file>Resourse/image/volume.svg</file>
     </qresource>
 </RCC>

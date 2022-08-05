@@ -53,8 +53,8 @@ private:
     // VBO
     QOpenGLBuffer mVertexBufferObject;
 
-    //
-    unsigned int mTextureArray[3] = {0};
+    // 纹理层
+    unsigned int mTextureArray[3] = { 0 };
 
     // 视频帧队列
     ThreadSafeQueue<VideoFrame> mQueueVideoFrame;
@@ -71,6 +71,9 @@ private:
     // 视频展示尺寸
     int mVideoWidth;
     int mVideoHeight;
+
+    // 播放锁
+    std::mutex mMutexPlayFrame;
 };
 
 #endif // WIDGETPLAYER_H
