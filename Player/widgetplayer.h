@@ -30,6 +30,9 @@ public:
     // 停止播放
     void stop();
 
+    // 设置音量
+    void setAudioVolume(qreal volume);
+
 signals:
     void sgl_thead_update_video_frame();
 
@@ -92,8 +95,11 @@ private:
     // 播放锁
     std::mutex mMutexPlayFrame;
 
-    // 播放状态
+    // 播放器状态
     bool mMediaPlayFlag = false;
+
+    // 播放状态
+    bool mMediaPauseFlag = false;
 };
 
 #endif // WIDGETPLAYER_H

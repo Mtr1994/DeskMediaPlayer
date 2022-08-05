@@ -17,6 +17,13 @@ public:
 
     void init();
 
+private slots:
+    void slot_start_play_video();
+
+    void slot_pause_play_video();
+
+    void slot_change_audio_volume(int volume);
+
 private:
     Ui::MainWindow *ui;
 };

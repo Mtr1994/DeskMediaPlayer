@@ -1,4 +1,6 @@
 ﻿#include "widgetplayer.h"
+#include "Public/appsignal.h"
+#include "Configure/softconfig.h"
 
 extern "C"
 {
@@ -15,6 +17,7 @@ extern "C"
 #include <thread>
 #include <QAudioFormat>
 #include <QAudioOutput>
+#include <algorithm>
 
 // test
 #include <QDebug>
@@ -32,6 +35,8 @@ WidgetPlayer::~WidgetPlayer()
 
     // 立即停止播放
     stop();
+
+    if (nullptr != mAudioOutput) delete mAudioOutput;
 }
 
 void WidgetPlayer::play(const QString &path)
@@ -53,19 +58,42 @@ void WidgetPlayer::play(const QString &path)
 
 void WidgetPlayer::start()
 {
-
-
-
+    mMediaPauseFlag = false;
+    mStartTimeStamp = 0;
 }
 
 void WidgetPlayer::pause()
 {
-
+    mMediaPauseFlag = true;
 }
 
 void WidgetPlayer::stop()
 {
     mMediaPlayFlag = false;
+
+    while (!mQueueVideoFrame.empty())
+    {
+        VideoFrame frame;
+        mQueueVideoFrame.wait_and_pop(frame);
+        delete [] frame.d1;
+        delete [] frame.d2;
+        delete [] frame.d3;
+        mQueueVideoFrame.wait_and_pop();
+    }
+
+    while (!mQueueAudioFrame.empty())
+    {
+        AudioFrame frame;
+        mQueueAudioFrame.wait_and_pop(frame);
+        delete [] frame.data;
+        mQueueAudioFrame.wait_and_pop();
+    }
+}
+
+void WidgetPlayer::setAudioVolume(qreal volume)
+{
+    mAudioVolume = volume;
+    mAudioOutput->setVolume(mAudioVolume);
 }
 
 void WidgetPlayer::initializeGL()
@@ -216,6 +244,7 @@ void WidgetPlayer::parse(const QString &path)
         return;
     }
 
+    uint32_t duration = 0;
     for (unsigned i = 0; i < formatCtx->nb_streams; i++)
     {
         if (formatCtx->streams[i]->codecpar->codec_type == AVMEDIA_TYPE_VIDEO)
@@ -238,6 +267,9 @@ void WidgetPlayer::parse(const QString &path)
                 printf("Could not open codec.");
                 return;
             }
+
+            double timebase = (double)codeCtxVideo->pkt_timebase.num / codeCtxVideo->pkt_timebase.den;
+            duration = std::max(duration, (uint32_t)(formatCtx->streams[i]->duration * timebase));
 
             // 存在视频流，准备播放
             auto funcPlayVideo= std::bind(&WidgetPlayer::playVideoFrame, this);
@@ -263,6 +295,9 @@ void WidgetPlayer::parse(const QString &path)
                 return;
             }
 
+            double timebase = (double)codeCtxAudio->pkt_timebase.num / codeCtxAudio->pkt_timebase.den;
+            duration = std::max(duration, (uint32_t)(formatCtx->streams[i]->duration * timebase));
+
             mSampleSize = av_get_bytes_per_sample(codeCtxAudio->sample_fmt);
             mSampleRate = codeCtxAudio->sample_rate;
             mAudioChannles = codeCtxAudio->channels;
@@ -273,6 +308,9 @@ void WidgetPlayer::parse(const QString &path)
             threadPlayAudio.detach();
         }
     }
+
+    // 视频时长
+    emit AppSignal::getInstance()->sgl_get_media_duration(duration);
 
     auto sampleSize = av_get_bytes_per_sample(AV_SAMPLE_FMT_FLT);
     // 分配一个packet
@@ -429,6 +467,8 @@ void WidgetPlayer::parse(const QString &path)
     av_packet_free(&packet);
     avcodec_free_context(&codeCtxVideo);
     avcodec_free_context(&codeCtxAudio);
+
+    qDebug() << "parse media over ";
 }
 
 void WidgetPlayer::playVideoFrame()
@@ -436,12 +476,12 @@ void WidgetPlayer::playVideoFrame()
     while (mMediaPlayFlag)
     {
         VideoFrame frame;
-        if (mQueueVideoFrame.empty()) continue;
+        if (mQueueVideoFrame.empty() || mMediaPauseFlag) continue;
         mQueueVideoFrame.wait_and_pop(frame);
 
         uint64_t currentTimeStamp = getCurrentMillisecond();
         uint64_t time = frame.pts * frame.timebase * 1000;
-        if (mStartTimeStamp == 0) mStartTimeStamp = currentTimeStamp + time;
+        if (mStartTimeStamp == 0) mStartTimeStamp = currentTimeStamp - time;
 
         if ((currentTimeStamp - mStartTimeStamp) < time) continue;
 
@@ -472,6 +512,9 @@ void WidgetPlayer::playVideoFrame()
         lock.unlock();
 
         emit sgl_thead_update_video_frame();
+
+        // 更新视频当前播放时长（frame . pts 不一定从 0 开始）
+        emit AppSignal::getInstance()->sgl_current_video_frame_time(frame.pts * frame.timebase);
     }
 
     qDebug() << "play video over ";
@@ -489,6 +532,7 @@ void WidgetPlayer::playAudioFrame()
     if (nullptr == mAudioOutput)
     {
         mAudioOutput = new QAudioOutput(audioFormat);
+        mAudioVolume = SoftConfig::getInstance()->getValue("Volume", "value").toUInt();
         mAudioOutput->setVolume(mAudioVolume);
     }
 
@@ -499,12 +543,12 @@ void WidgetPlayer::playAudioFrame()
     while (mMediaPlayFlag)
     {
         AudioFrame frame;
-        if (mQueueAudioFrame.empty()) continue;
+        if (mQueueAudioFrame.empty() || mMediaPauseFlag) continue;
         mQueueAudioFrame.wait_and_pop(frame);
 
         uint64_t currentTimeStamp = getCurrentMillisecond();
         uint64_t time = frame.pts * frame.timebase * 1000;
-        if (mStartTimeStamp == 0) mStartTimeStamp = currentTimeStamp + time;
+        if (mStartTimeStamp == 0) mStartTimeStamp = currentTimeStamp - time;
 
         if ((currentTimeStamp - mStartTimeStamp) < time) continue;
 
@@ -524,6 +568,7 @@ void WidgetPlayer::playAudioFrame()
         }
     }
 
+    qDebug() << "play audio over ";
 }
 
 uint64_t WidgetPlayer::getCurrentMillisecond()

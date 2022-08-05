@@ -1,5 +1,6 @@
 ﻿#include "mainwindow.h"
 #include "ui_mainwindow.h"
+#include "Public/appsignal.h"
 
 #include <QScreen>
 #include <Windows.h>
@@ -35,7 +36,26 @@ void MainWindow::init()
 
     resize(width, height);
 
+    connect(AppSignal::getInstance(), &AppSignal::sgl_start_play_video, this, &MainWindow::slot_start_play_video);
+    connect(AppSignal::getInstance(), &AppSignal::sgl_pause_play_video, this, &MainWindow::slot_pause_play_video);
+    connect(AppSignal::getInstance(), &AppSignal::sgl_change_audio_volume, this, &MainWindow::slot_change_audio_volume);
+
     // 默认测试播放
-    ui->widgetOpenGLPlayer->play("C:/Users/admin/Desktop/videos/ds.mov");
+    ui->widgetOpenGLPlayer->play("C:/Users/87482/Desktop/videos/demo2.mp4");
+}
+
+void MainWindow::slot_start_play_video()
+{
+    ui->widgetOpenGLPlayer->start();
+}
+
+void MainWindow::slot_pause_play_video()
+{
+    ui->widgetOpenGLPlayer->pause();
+}
+
+void MainWindow::slot_change_audio_volume(int volume)
+{
+    ui->widgetOpenGLPlayer->setAudioVolume(volume * 1.0 / 100.0);
 }
 
