@@ -13,19 +13,25 @@ extern "C"
 }
 
 #include <thread>
+#include <QAudioFormat>
+#include <QAudioOutput>
 
 // test
 #include <QDebug>
 
 WidgetPlayer::WidgetPlayer(QWidget *parent) : QOpenGLWidget(parent)
 {
-    mCurrentFrame.pts = -1;
+    mCurrentVideoFrame.pts = -1;
+    mCurrentAudioFrame.pts = -1;
 }
 
 WidgetPlayer::~WidgetPlayer()
 {
     //glDeleteBuffers();
     //glDeleteProgram();
+
+    // 立即停止播放
+    stop();
 }
 
 void WidgetPlayer::play(const QString &path)
@@ -34,6 +40,8 @@ void WidgetPlayer::play(const QString &path)
 
     // 线程更新视频界面
     connect(this, &WidgetPlayer::sgl_thead_update_video_frame, this, [this] { update();}, Qt::QueuedConnection);
+
+    mMediaPlayFlag = true;
 
     auto funcParse = std::bind(&WidgetPlayer::parse, this, std::placeholders::_1);
     std::thread threadParse(funcParse, path);
@@ -45,9 +53,9 @@ void WidgetPlayer::play(const QString &path)
 
 void WidgetPlayer::start()
 {
-    auto funcStart= std::bind(&WidgetPlayer::playVideoFrame, this);
-    std::thread threadStart(funcStart);
-    threadStart.detach();
+
+
+
 }
 
 void WidgetPlayer::pause()
@@ -57,7 +65,7 @@ void WidgetPlayer::pause()
 
 void WidgetPlayer::stop()
 {
-
+    mMediaPlayFlag = false;
 }
 
 void WidgetPlayer::initializeGL()
@@ -95,7 +103,7 @@ void WidgetPlayer::paintGL()
     glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
-    if (mCurrentFrame.pts < 0) return;
+    if (mCurrentVideoFrame.pts < 0) return;
 
     mShaderProgram.bind();
     mVertexBufferObject.bind();
@@ -108,8 +116,8 @@ void WidgetPlayer::paintGL()
 
     glActiveTexture(GL_TEXTURE0);
     glBindTexture(GL_TEXTURE_2D, mTextureArray[0]);
-    glPixelStorei(GL_UNPACK_ROW_LENGTH, mCurrentFrame.linesize1);
-    glTexImage2D(GL_TEXTURE_2D, 0, GL_LUMINANCE, mCurrentFrame.width1, mCurrentFrame.height1, 0, GL_LUMINANCE, GL_UNSIGNED_BYTE, mCurrentFrame.d1);
+    glPixelStorei(GL_UNPACK_ROW_LENGTH, mCurrentVideoFrame.linesize1);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_LUMINANCE, mCurrentVideoFrame.width1, mCurrentVideoFrame.height1, 0, GL_LUMINANCE, GL_UNSIGNED_BYTE, mCurrentVideoFrame.d1);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
@@ -117,8 +125,8 @@ void WidgetPlayer::paintGL()
 
     glActiveTexture(GL_TEXTURE1);
     glBindTexture(GL_TEXTURE_2D, mTextureArray[1]);
-    glPixelStorei(GL_UNPACK_ROW_LENGTH, mCurrentFrame.linesize2);
-    glTexImage2D(GL_TEXTURE_2D, 0, GL_LUMINANCE, mCurrentFrame.width2, mCurrentFrame.height2, 0, GL_LUMINANCE, GL_UNSIGNED_BYTE, mCurrentFrame.d2);
+    glPixelStorei(GL_UNPACK_ROW_LENGTH, mCurrentVideoFrame.linesize2);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_LUMINANCE, mCurrentVideoFrame.width2, mCurrentVideoFrame.height2, 0, GL_LUMINANCE, GL_UNSIGNED_BYTE, mCurrentVideoFrame.d2);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
@@ -126,8 +134,8 @@ void WidgetPlayer::paintGL()
 
     glActiveTexture(GL_TEXTURE2);
     glBindTexture(GL_TEXTURE_2D, mTextureArray[2]);
-    glPixelStorei(GL_UNPACK_ROW_LENGTH, mCurrentFrame.linesize3);
-    glTexImage2D(GL_TEXTURE_2D, 0, GL_LUMINANCE, mCurrentFrame.width3, mCurrentFrame.height3, 0, GL_LUMINANCE, GL_UNSIGNED_BYTE, mCurrentFrame.d3);
+    glPixelStorei(GL_UNPACK_ROW_LENGTH, mCurrentVideoFrame.linesize3);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_LUMINANCE, mCurrentVideoFrame.width3, mCurrentVideoFrame.height3, 0, GL_LUMINANCE, GL_UNSIGNED_BYTE, mCurrentVideoFrame.d3);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
@@ -149,14 +157,14 @@ void WidgetPlayer::resizeGL(int w, int h)
 {
     if(h <= 0) h = 1;
 
-    if (mCurrentFrame.pts < 0)
+    if (mCurrentVideoFrame.pts < 0)
     {
         mVideoWidth = 0;
         mVideoHeight = 0;
         return;
     }
 
-    double rate = (double)mCurrentFrame.height / mCurrentFrame.width;
+    double rate = (double)mCurrentVideoFrame.height / mCurrentVideoFrame.width;
     double widthSize = w;
     double heightSize = w * rate;
 
@@ -230,6 +238,11 @@ void WidgetPlayer::parse(const QString &path)
                 printf("Could not open codec.");
                 return;
             }
+
+            // 存在视频流，准备播放
+            auto funcPlayVideo= std::bind(&WidgetPlayer::playVideoFrame, this);
+            std::thread threadPlayVideo(funcPlayVideo);
+            threadPlayVideo.detach();
         }
         else if (formatCtx->streams[i]->codecpar->codec_type== AVMEDIA_TYPE_AUDIO)
         {
@@ -249,6 +262,15 @@ void WidgetPlayer::parse(const QString &path)
                 printf("Could not open codec.");
                 return;
             }
+
+            mSampleSize = codeCtxAudio->bits_per_coded_sample;
+            mSampleRate = codeCtxAudio->sample_rate;
+            mAudioChannles = codeCtxAudio->channels;
+
+            // 存在音频流，准备播放
+            auto funcPlayAudio= std::bind(&WidgetPlayer::playAudioFrame, this);
+            std::thread threadPlayAudio(funcPlayAudio);
+            threadPlayAudio.detach();
         }
     }
 
@@ -260,7 +282,8 @@ void WidgetPlayer::parse(const QString &path)
 
     std::mutex mutexParse;
     std::condition_variable cvParse;
-    while (true)
+
+    while (mMediaPlayFlag)
     {
         std::unique_lock<std::mutex> lock(mutexParse);
         if(cvParse.wait_for(lock, std::chrono::milliseconds(milliseconds)) == std::cv_status::timeout)
@@ -410,17 +433,17 @@ void WidgetPlayer::parse(const QString &path)
 
 void WidgetPlayer::playVideoFrame()
 {
-    uint64_t startTime = getCurrentMillisecond();
-    while (true)
+    while (mMediaPlayFlag)
     {
         VideoFrame frame;
         if (mQueueVideoFrame.empty()) continue;
         mQueueVideoFrame.wait_and_pop(frame);
 
-        int64_t currentTime = getCurrentMillisecond();
-        int time = frame.pts * frame.timebase * 1000;
+        uint64_t currentTimeStamp = getCurrentMillisecond();
+        uint64_t time = frame.pts * frame.timebase * 1000;
+        if (mStartTimeStamp == 0) mStartTimeStamp = currentTimeStamp + time;
 
-        if (int(currentTime - startTime) < time) continue;
+        if ((currentTimeStamp - mStartTimeStamp) < time) continue;
 
         mQueueVideoFrame.wait_and_pop();
 
@@ -438,20 +461,69 @@ void WidgetPlayer::playVideoFrame()
         mVideoHeight = heightSize;
 
         std::unique_lock<std::mutex> lock(mMutexPlayFrame);
-        if (mCurrentFrame.pts > 0)
+        if (mCurrentVideoFrame.pts > 0)
         {
-            delete [] mCurrentFrame.d1;
-            delete [] mCurrentFrame.d2;
-            delete [] mCurrentFrame.d3;
+            delete [] mCurrentVideoFrame.d1;
+            delete [] mCurrentVideoFrame.d2;
+            delete [] mCurrentVideoFrame.d3;
         }
 
-        mCurrentFrame = frame;
+        mCurrentVideoFrame = frame;
         lock.unlock();
 
         emit sgl_thead_update_video_frame();
     }
 
     qDebug() << "play video over ";
+}
+
+void WidgetPlayer::playAudioFrame()
+{
+    QAudioFormat audioFormat;
+    audioFormat.setSampleRate(mSampleRate);
+    audioFormat.setChannelCount(mAudioChannles);
+    audioFormat.setSampleSize(8 * mSampleSize);
+    audioFormat.setSampleType(QAudioFormat::Float);
+    audioFormat.setCodec("audio/pcm");
+
+    if (nullptr == mAudioOutput)
+    {
+        mAudioOutput = new QAudioOutput(audioFormat);
+        mAudioOutput->setVolume(mAudioVolume);
+    }
+
+    mAudioOutput->setBufferSize(mSampleRate * mAudioChannles * mSampleSize);
+    mIODevice = mAudioOutput->start();
+
+    // 提取音频帧
+    while (mMediaPlayFlag)
+    {
+        AudioFrame frame;
+        if (mQueueAudioFrame.empty()) continue;
+        mQueueAudioFrame.wait_and_pop(frame);
+
+        uint64_t currentTimeStamp = getCurrentMillisecond();
+        uint64_t time = frame.pts * frame.timebase * 1000;
+        if (mStartTimeStamp == 0) mStartTimeStamp = currentTimeStamp + time;
+
+        if ((currentTimeStamp - mStartTimeStamp) < time) continue;
+
+        mQueueAudioFrame.wait_and_pop();
+
+        if (mCurrentAudioFrame.pts > 0)
+        {
+            delete [] mCurrentAudioFrame.data;
+        }
+
+        mCurrentAudioFrame = frame;
+
+        if (nullptr == frame.data) return;
+        if (nullptr != mIODevice && mAudioVolume > 0)
+        {
+           mIODevice->write((const char*)frame.data, frame.size);
+        }
+    }
+
 }
 
 uint64_t WidgetPlayer::getCurrentMillisecond()

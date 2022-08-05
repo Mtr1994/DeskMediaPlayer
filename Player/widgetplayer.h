@@ -45,6 +45,9 @@ private:
     // 视频播放线程
     void playVideoFrame();
 
+    // 音频播放线程
+    void playAudioFrame();
+
     uint64_t getCurrentMillisecond();
 
 private:
@@ -66,14 +69,31 @@ private:
     std::condition_variable mCvPlayMedia;
 
     // 当前视频帧数据
-    VideoFrame mCurrentFrame;
+    VideoFrame mCurrentVideoFrame;
+
+    // 当前音频帧
+    AudioFrame mCurrentAudioFrame;
 
     // 视频展示尺寸
     int mVideoWidth;
     int mVideoHeight;
 
+    int mSampleSize = 0;
+    int mSampleRate = 0;
+    int mAudioChannles = 0;
+
+    // 视频开始播放的时间戳
+    uint64_t mStartTimeStamp = 0;;
+
+    QAudioOutput* mAudioOutput = nullptr;
+    qreal mAudioVolume = 0.36;
+    QIODevice* mIODevice = nullptr;
+
     // 播放锁
     std::mutex mMutexPlayFrame;
+
+    // 播放状态
+    bool mMediaPlayFlag = false;
 };
 
 #endif // WIDGETPLAYER_H
