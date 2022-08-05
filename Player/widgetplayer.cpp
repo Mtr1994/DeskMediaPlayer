@@ -263,7 +263,7 @@ void WidgetPlayer::parse(const QString &path)
                 return;
             }
 
-            mSampleSize = codeCtxAudio->bits_per_coded_sample;
+            mSampleSize = av_get_bytes_per_sample(codeCtxAudio->sample_fmt);
             mSampleRate = codeCtxAudio->sample_rate;
             mAudioChannles = codeCtxAudio->channels;
 
