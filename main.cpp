@@ -18,7 +18,7 @@ int main(int argc, char *argv[])
 
     if (argc >= 2)
     {
-        SoftConfig::getInstance()->setValue("Media", "path", argv[1]);
+        SoftConfig::getInstance()->setValue("Media", "path", QString::fromLocal8Bit(argv[1]));
     }
 
     // 加载样式
