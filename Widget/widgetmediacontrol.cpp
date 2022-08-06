@@ -5,6 +5,9 @@
 
 #include <thread>
 
+// test
+#include <QDebug>
+
 WidgetMediaControl::WidgetMediaControl(QWidget *parent) :
     QWidget(parent),
     ui(new Ui::WidgetMediaControl)
@@ -57,14 +60,19 @@ void WidgetMediaControl::slot_btn_play_click()
 
 void WidgetMediaControl::slot_volume_value_change(int volume)
 {
-
-
     emit AppSignal::getInstance()->sgl_change_audio_volume(volume);
 }
 
-void WidgetMediaControl::slot_get_media_duration(uint32_t duration)
+void WidgetMediaControl::slot_get_media_duration(int64_t duration)
 {
     mMediaDuration = duration;
+    if (mMediaDuration < 0)
+    {
+        ui->lbDuration->setText("00:00:00");
+        ui->lbDurationLeft->setText("00:00:00");
+        return;
+    }
+
     ui->slider->setRange(0, mMediaDuration * 1000000);
 
     ui->lbDurationLeft->setText(QString("%1:%2:%3").arg(mMediaDuration / 3600, 2, 10, QLatin1Char('0')).arg(mMediaDuration / 60, 2, 10, QLatin1Char('0')).arg(mMediaDuration % 60, 2, 10, QLatin1Char('0')));
@@ -72,6 +80,8 @@ void WidgetMediaControl::slot_get_media_duration(uint32_t duration)
 
 void WidgetMediaControl::slot_current_video_frame_time(float time)
 {
+    if (mMediaDuration < 0) return;
+
     uint32_t currentTime = time * 1000000;
     ui->slider->setValue(currentTime);
 

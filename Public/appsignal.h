@@ -25,7 +25,7 @@ signals:
     void sgl_change_audio_volume(int volume);
 
     // 视频时长
-    void sgl_get_media_duration(uint32_t duration);
+    void sgl_get_media_duration(int64_t duration);
 
     // 视频当前播放帧
     void sgl_current_video_frame_time(float time);

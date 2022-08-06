@@ -244,7 +244,6 @@ void WidgetPlayer::parse(const QString &path)
         return;
     }
 
-    uint32_t duration = 0;
     for (unsigned i = 0; i < formatCtx->nb_streams; i++)
     {
         if (formatCtx->streams[i]->codecpar->codec_type == AVMEDIA_TYPE_VIDEO)
@@ -267,9 +266,6 @@ void WidgetPlayer::parse(const QString &path)
                 printf("Could not open codec.");
                 return;
             }
-
-            double timebase = (double)codeCtxVideo->pkt_timebase.num / codeCtxVideo->pkt_timebase.den;
-            duration = std::max(duration, (uint32_t)(formatCtx->streams[i]->duration * timebase));
 
             // 存在视频流，准备播放
             auto funcPlayVideo= std::bind(&WidgetPlayer::playVideoFrame, this);
@@ -295,12 +291,10 @@ void WidgetPlayer::parse(const QString &path)
                 return;
             }
 
-            double timebase = (double)codeCtxAudio->pkt_timebase.num / codeCtxAudio->pkt_timebase.den;
-            duration = std::max(duration, (uint32_t)(formatCtx->streams[i]->duration * timebase));
-
-            mSampleSize = av_get_bytes_per_sample(codeCtxAudio->sample_fmt);
+            mSampleSize = av_get_bytes_per_sample(AV_SAMPLE_FMT_FLT);
             mSampleRate = codeCtxAudio->sample_rate;
             mAudioChannles = codeCtxAudio->channels;
+            mAudioSampleFormat = codeCtxAudio->sample_fmt;
 
             // 存在音频流，准备播放
             auto funcPlayAudio= std::bind(&WidgetPlayer::playAudioFrame, this);
@@ -308,6 +302,8 @@ void WidgetPlayer::parse(const QString &path)
             threadPlayAudio.detach();
         }
     }
+
+    int32_t duration = formatCtx->duration * 1.0 / AV_TIME_BASE;
 
     // 视频时长
     emit AppSignal::getInstance()->sgl_get_media_duration(duration);
@@ -337,6 +333,7 @@ void WidgetPlayer::parse(const QString &path)
                     continue;
                 }
 
+                SwsContext* pSwsCtx = nullptr;
                 while (ret >= 0)
                 {
                     ret = avcodec_receive_frame(codeCtxVideo, frame);
@@ -352,38 +349,54 @@ void WidgetPlayer::parse(const QString &path)
                     }
 
                     frame->pts = frame->best_effort_timestamp;
+                    if (mBeginTimeStamp < 0) mBeginTimeStamp = frame->pts;
+
+                    if (nullptr == pSwsCtx)
+                    {
+                        pSwsCtx = sws_getContext(codeCtxVideo->width, codeCtxVideo->height, (AVPixelFormat)frame->format, codeCtxVideo->width, codeCtxVideo->height, AV_PIX_FMT_YUV420P, SWS_BICUBIC, nullptr, nullptr, nullptr);
+                    }
 
                     int pixWidth = frame->width;
                     int pixHeight = frame->height;
 
-                    VideoFrame videoFrame = { frame->pts, pixWidth, pixHeight, sampleSize, 0, nullptr, 0, 0, 0, nullptr, 0, 0, 0, nullptr, 0, 0, 0 };
+                    uint8_t *d1 = new uint8_t[frame->linesize[0] * pixHeight];
+                    uint8_t *d2 = new uint8_t[frame->linesize[0] * pixHeight / 4];
+                    uint8_t *d3 = new uint8_t[frame->linesize[0] * pixHeight / 4];
+
+                    VideoFrame videoFrame = { frame->pts - mBeginTimeStamp, pixWidth, pixHeight, sampleSize, 0, d1, 0, 0, 0, d2, 0, 0, 0, d3, 0, 0, 0 };
                     if (frame->format == AV_PIX_FMT_YUV420P)
                     {
-                        uint8_t *d1 = new uint8_t[frame->linesize[0] * pixHeight];
-                        uint8_t *d2 = new uint8_t[frame->linesize[0] * pixHeight / 4];
-                        uint8_t *d3 = new uint8_t[frame->linesize[0] * pixHeight / 4];
-
                         memcpy(d1, frame->data[0], frame->linesize[0] * pixHeight);
                         memcpy(d2, frame->data[1], frame->linesize[0] * pixHeight / 4);
                         memcpy(d3, frame->data[2], frame->linesize[0] * pixHeight / 4);
 
                         videoFrame.timebase = (double)codeCtxVideo->pkt_timebase.num / codeCtxVideo->pkt_timebase.den;
-
-                        videoFrame.d1 = d1;
-                        videoFrame.width1 = pixWidth;
-                        videoFrame.height1 = pixHeight;
-                        videoFrame.linesize1 = frame->linesize[0];
-
-                        videoFrame.d2 = d2;
-                        videoFrame.width2 = pixWidth / 2;
-                        videoFrame.height2 = pixHeight / 2;
-                        videoFrame.linesize2 = frame->linesize[1];
-
-                        videoFrame.d3 = d3;
-                        videoFrame.width3 = pixWidth / 2;
-                        videoFrame.height3 = pixHeight / 2;
-                        videoFrame.linesize3 = frame->linesize[2];
                     }
+                    else
+                    {
+                        uint8_t *data[AV_NUM_DATA_POINTERS] = { (uint8_t *)d1, (uint8_t *)d2, (uint8_t *)d3 };
+                        int ret = sws_scale(pSwsCtx, (uint8_t const * const *) frame->data, frame->linesize, 0, frame->height, data, frame->linesize);
+                        if (ret <= 0)
+                        {
+                            memset(d1, 0, frame->linesize[0] * pixHeight);
+                            memset(d2, 0, frame->linesize[0] * pixHeight / 4);
+                            memset(d3, 0, frame->linesize[0] * pixHeight / 4);
+                        }
+
+                        videoFrame.timebase = (double)codeCtxVideo->pkt_timebase.num / codeCtxVideo->pkt_timebase.den;
+                    }
+
+                    videoFrame.width1 = pixWidth;
+                    videoFrame.height1 = pixHeight;
+                    videoFrame.linesize1 = frame->linesize[0];
+
+                    videoFrame.width2 = pixWidth / 2;
+                    videoFrame.height2 = pixHeight / 2;
+                    videoFrame.linesize2 = frame->linesize[1];
+
+                    videoFrame.width3 = pixWidth / 2;
+                    videoFrame.height3 = pixHeight / 2;
+                    videoFrame.linesize3 = frame->linesize[2];
 
                     // 根据实际数量，动态修改等待时间
                     size_t size = mQueueVideoFrame.size();
@@ -397,6 +410,7 @@ void WidgetPlayer::parse(const QString &path)
                     av_frame_unref(frame);
                 }
                 av_packet_unref(packet);
+                sws_freeContext(pSwsCtx);
             }
             else if (packet->stream_index == audioStreamIndex)
             {
@@ -406,7 +420,8 @@ void WidgetPlayer::parse(const QString &path)
                     av_packet_unref(packet);
                     continue;
                 }
-                AVFrame *frame = av_frame_alloc();
+
+                SwrContext* swrCtx = nullptr;
                 while (ret >= 0)
                 {
                     ret = avcodec_receive_frame(codeCtxAudio, frame);
@@ -423,40 +438,30 @@ void WidgetPlayer::parse(const QString &path)
 
                     frame->pts = frame->best_effort_timestamp;
 
-                    auto swrCtx = swr_alloc_set_opts(nullptr, frame->channel_layout, AV_SAMPLE_FMT_FLT, codeCtxAudio->sample_rate, codeCtxAudio->channel_layout, codeCtxAudio->sample_fmt, codeCtxAudio->sample_rate, 0, nullptr);
+                    if (frame->best_effort_timestamp < 0) break;
+
+                    swrCtx = swr_alloc_set_opts(nullptr, frame->channel_layout, AV_SAMPLE_FMT_FLT, codeCtxAudio->sample_rate, codeCtxAudio->channel_layout, codeCtxAudio->sample_fmt, codeCtxAudio->sample_rate, 0, nullptr);
                     swr_init(swrCtx);
                     int bufsize = av_samples_get_buffer_size(frame->linesize, frame->channels, frame->nb_samples, AV_SAMPLE_FMT_FLT, 0);
                     uint8_t *buf = new uint8_t[bufsize];
                     const int out_num_samples = av_rescale_rnd(swr_get_delay(swrCtx, frame->sample_rate) + frame->nb_samples, frame->sample_rate, frame->sample_rate, AV_ROUND_UP);
                     int tmpSize = swr_convert(swrCtx, &buf, out_num_samples, (const uint8_t**)(frame->data), frame->nb_samples);
-                    if (tmpSize > 0)
-                    {
-                       AudioFrame audio =
-                        {
-                            frame->pts,
-                            bufsize,
-                            (double)codeCtxAudio->pkt_timebase.num / codeCtxAudio->pkt_timebase.den,
-                            buf
-                        };
+                    if (tmpSize <= 0) break;
 
-                       mQueueAudioFrame.push(audio);
-
-                       mCvPlayMedia.notify_all();
-                    }
-                    else
-                    {
-                        qDebug() << "audio  convert failed";
-                    }
-
-                    swr_free(&swrCtx);
-
+                    AudioFrame audio = { frame->pts, bufsize, 0, buf };
+                    audio.timebase = (double)codeCtxAudio->pkt_timebase.num / codeCtxAudio->pkt_timebase.den;
+                    mQueueAudioFrame.push(audio);
+                    mCvPlayMedia.notify_all();
                     milliseconds = 0;
+
+                    av_frame_unref(frame);
                 }
+
                 av_packet_unref(packet);
+                swr_free(&swrCtx);
             }
             else
             {
-                qDebug() << "other stream";
                 milliseconds = 0;
             }
         }
@@ -481,6 +486,7 @@ void WidgetPlayer::playVideoFrame()
 
         uint64_t currentTimeStamp = getCurrentMillisecond();
         uint64_t time = frame.pts * frame.timebase * 1000;
+
         if (mStartTimeStamp == 0) mStartTimeStamp = currentTimeStamp - time;
 
         if ((currentTimeStamp - mStartTimeStamp) < time) continue;
@@ -527,12 +533,13 @@ void WidgetPlayer::playAudioFrame()
     audioFormat.setChannelCount(mAudioChannles);
     audioFormat.setSampleSize(8 * mSampleSize);
     audioFormat.setSampleType(QAudioFormat::Float);
+
     audioFormat.setCodec("audio/pcm");
 
     if (nullptr == mAudioOutput)
     {
         mAudioOutput = new QAudioOutput(audioFormat);
-        mAudioVolume = SoftConfig::getInstance()->getValue("Volume", "value").toUInt();
+        mAudioVolume = SoftConfig::getInstance()->getValue("Volume", "value").toUInt() * 1.0 / 100;
         mAudioOutput->setVolume(mAudioVolume);
     }
 
@@ -549,7 +556,6 @@ void WidgetPlayer::playAudioFrame()
         uint64_t currentTimeStamp = getCurrentMillisecond();
         uint64_t time = frame.pts * frame.timebase * 1000;
         if (mStartTimeStamp == 0) mStartTimeStamp = currentTimeStamp - time;
-
         if ((currentTimeStamp - mStartTimeStamp) < time) continue;
 
         mQueueAudioFrame.wait_and_pop();

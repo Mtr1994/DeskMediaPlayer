@@ -84,9 +84,13 @@ private:
     int mSampleSize = 0;
     int mSampleRate = 0;
     int mAudioChannles = 0;
+    int mAudioSampleFormat = 0;
 
     // 视频开始播放的时间戳
-    uint64_t mStartTimeStamp = 0;;
+    uint64_t mStartTimeStamp = 0;
+
+    // 视频第一帧的时间戳
+    int64_t mBeginTimeStamp = -1;
 
     QAudioOutput* mAudioOutput = nullptr;
     qreal mAudioVolume = 0.36;

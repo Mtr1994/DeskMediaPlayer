@@ -2,13 +2,24 @@
 #include "Configure/softconfig.h"
 
 #include <QApplication>
+#include <QDir>
+
+// test
+#include <QDebug>
 
 int main(int argc, char *argv[])
 {
     QApplication a(argc, argv);
 
+    QDir::setCurrent(QApplication::applicationDirPath());
+
     // 初始化配置文件
     SoftConfig::getInstance()->init();
+
+    if (argc >= 2)
+    {
+        SoftConfig::getInstance()->setValue("Media", "path", argv[1]);
+    }
 
     // 加载样式
     qApp->setStyleSheet("file:///:/Resourse/qss/style.qss");

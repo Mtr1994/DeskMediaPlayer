@@ -3,7 +3,7 @@
 
 AppSignal::AppSignal(QObject *parent) : QObject(parent)
 {
-    qRegisterMetaType<uint32_t>("uint32_t");
+    qRegisterMetaType<int64_t>("int64_t");
 }
 
 AppSignal *AppSignal::getInstance()
