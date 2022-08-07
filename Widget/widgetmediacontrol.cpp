@@ -19,6 +19,9 @@ WidgetMediaControl::WidgetMediaControl(QWidget *parent) :
 
 WidgetMediaControl::~WidgetMediaControl()
 {
+    // 记录音量配置
+    SoftConfig::getInstance()->setValue("Volume", "value", QString::number(ui->sliderVolume->value()));
+
     delete ui;
 }
 
@@ -27,18 +30,6 @@ void WidgetMediaControl::init()
     connect(ui->btnPlay, &QPushButton::clicked, this, &WidgetMediaControl::slot_btn_play_click);
 
     connect(ui->sliderVolume, &QSlider::valueChanged, this, &WidgetMediaControl::slot_volume_value_change);
-    connect(ui->sliderVolume, &QSlider::sliderReleased, this, [this]
-    {
-        auto func = [this]
-        {
-            // 记录音量配置
-            SoftConfig::getInstance()->setValue("Volume", "value", QString::number(ui->sliderVolume->value()));
-        };
-
-        std::thread th(func);
-        th.detach();
-    });
-
     // 读取音量配置
     ui->sliderVolume->setValue(SoftConfig::getInstance()->getValue("Volume", "value").toUInt());
 
@@ -85,8 +76,8 @@ void WidgetMediaControl::slot_current_video_frame_time(float time)
     uint32_t currentTime = time * 1000000;
     ui->slider->setValue(currentTime);
 
-    ui->lbDuration->setText(QString("%1:%2:%3").arg(uint32_t(time) / 3600, 2, 10, QLatin1Char('0')).arg(uint32_t(time) / 60, 2, 10, QLatin1Char('0')).arg(uint32_t(time) % 60, 2, 10, QLatin1Char('0')));
+    ui->lbDuration->setText(QString("%1:%2:%3").arg(uint32_t(time) / 3600, 2, 10, QLatin1Char('0')).arg(uint32_t(time) % 3600 / 60, 2, 10, QLatin1Char('0')).arg(uint32_t(time) % 60, 2, 10, QLatin1Char('0')));
 
     uint32_t leftTime = mMediaDuration - time;
-    ui->lbDurationLeft->setText(QString("%1:%2:%3").arg(leftTime / 3600, 2, 10, QLatin1Char('0')).arg(leftTime / 60, 2, 10, QLatin1Char('0')).arg(leftTime % 60, 2, 10, QLatin1Char('0')));
+    ui->lbDurationLeft->setText(QString("%1:%2:%3").arg(leftTime / 3600, 2, 10, QLatin1Char('0')).arg(leftTime % 3600 / 60, 2, 10, QLatin1Char('0')).arg(leftTime % 60, 2, 10, QLatin1Char('0')));
 }

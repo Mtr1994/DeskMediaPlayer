@@ -39,4 +39,5 @@ QString SoftConfig::getValue(const QString& entry, const QString& item)
 void SoftConfig::setValue(const QString& pEntry, const QString& pItem, const QString& pValue)
 {
     mSetting->setValue(pEntry + "/" + pItem, pValue);
+    mSetting->sync();
 }
