@@ -33,8 +33,15 @@ void WidgetMediaControl::init()
     // 读取音量配置
     ui->sliderVolume->setValue(SoftConfig::getInstance()->getValue("Volume", "value").toUInt());
 
-    connect(AppSignal::getInstance(), &AppSignal::sgl_get_media_duration, this, &WidgetMediaControl::slot_get_media_duration);
-    connect(AppSignal::getInstance(), &AppSignal::sgl_current_video_frame_time, this, &WidgetMediaControl::slot_current_video_frame_time);
+    connect(ui->slider, &QSlider::sliderPressed, this, [this]{ ui->slider->setSliderDown(true); });
+    connect(ui->slider, &QSlider::sliderReleased, this, [this]{ ui->slider->setSliderDown(false); });
+    connect(ui->slider, &QSlider::sliderMoved, this, [](int position)
+    {
+        emit AppSignal::getInstance()->sgl_seek_video_position(position);
+    });
+
+    connect(AppSignal::getInstance(), &AppSignal::sgl_init_media_duration, this, &WidgetMediaControl::slot_init_media_duration);
+    connect(AppSignal::getInstance(), &AppSignal::sgl_thread_current_video_frame_time, this, &WidgetMediaControl::slot_thread_current_video_frame_time, Qt::QueuedConnection);
 }
 
 void WidgetMediaControl::slot_btn_play_click()
@@ -54,30 +61,36 @@ void WidgetMediaControl::slot_volume_value_change(int volume)
     emit AppSignal::getInstance()->sgl_change_audio_volume(volume);
 }
 
-void WidgetMediaControl::slot_get_media_duration(int64_t duration)
+void WidgetMediaControl::slot_init_media_duration(int64_t duration, double timebase)
 {
-    mMediaDuration = duration;
-    if (mMediaDuration < 0)
+    if (duration < 0)
     {
         ui->lbDuration->setText("00:00:00");
         ui->lbDurationLeft->setText("00:00:00");
+        ui->slider->setValue(ui->slider->maximum());
         return;
     }
 
-    ui->slider->setRange(0, mMediaDuration * 1000000);
+    ui->slider->setRange(0, duration);
 
-    ui->lbDurationLeft->setText(QString("%1:%2:%3").arg(mMediaDuration / 3600, 2, 10, QLatin1Char('0')).arg(mMediaDuration / 60, 2, 10, QLatin1Char('0')).arg(mMediaDuration % 60, 2, 10, QLatin1Char('0')));
+    qDebug() << "init duration " << duration;
+
+    mMediaBaseDuration = duration * timebase;
+    ui->lbDurationLeft->setText(QString("%1:%2:%3").arg(mMediaBaseDuration / 3600, 2, 10, QLatin1Char('0')).arg(mMediaBaseDuration / 60, 2, 10, QLatin1Char('0')).arg(mMediaBaseDuration % 60, 2, 10, QLatin1Char('0')));
 }
 
-void WidgetMediaControl::slot_current_video_frame_time(float time)
+void WidgetMediaControl::slot_thread_current_video_frame_time(int64_t pts, float timebase)
 {
-    if (mMediaDuration < 0) return;
+    if (mMediaBaseDuration < 0) return;
 
-    uint32_t currentTime = time * 1000000;
-    ui->slider->setValue(currentTime);
+    if (!ui->slider->isSliderDown())
+    {
+        ui->slider->setValue(pts);
+    }
 
+    uint32_t time = pts * timebase;
     ui->lbDuration->setText(QString("%1:%2:%3").arg(uint32_t(time) / 3600, 2, 10, QLatin1Char('0')).arg(uint32_t(time) % 3600 / 60, 2, 10, QLatin1Char('0')).arg(uint32_t(time) % 60, 2, 10, QLatin1Char('0')));
 
-    uint32_t leftTime = mMediaDuration - time;
+    uint32_t leftTime = mMediaBaseDuration - time;
     ui->lbDurationLeft->setText(QString("%1:%2:%3").arg(leftTime / 3600, 2, 10, QLatin1Char('0')).arg(leftTime % 3600 / 60, 2, 10, QLatin1Char('0')).arg(leftTime % 60, 2, 10, QLatin1Char('0')));
 }

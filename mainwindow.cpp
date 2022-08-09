@@ -19,7 +19,7 @@ MainWindow::MainWindow(QWidget *parent)
 
 MainWindow::~MainWindow()
 {
-    // SoftConfig::getInstance()->setValue("Media", "path", "");
+    SoftConfig::getInstance()->setValue("Media", "path", "");
     delete ui;
 }
 
@@ -41,6 +41,7 @@ void MainWindow::init()
     connect(AppSignal::getInstance(), &AppSignal::sgl_start_play_video, this, &MainWindow::slot_start_play_video);
     connect(AppSignal::getInstance(), &AppSignal::sgl_pause_play_video, this, &MainWindow::slot_pause_play_video);
     connect(AppSignal::getInstance(), &AppSignal::sgl_change_audio_volume, this, &MainWindow::slot_change_audio_volume);
+    connect(AppSignal::getInstance(), &AppSignal::sgl_seek_video_position, this, &MainWindow::slot_seek_video_position);
 
     // 默认测试播放
     ui->widgetOpenGLPlayer->play(SoftConfig::getInstance()->getValue("Media", "path"));
@@ -59,5 +60,10 @@ void MainWindow::slot_pause_play_video()
 void MainWindow::slot_change_audio_volume(int volume)
 {
     ui->widgetOpenGLPlayer->setAudioVolume(volume * 1.0 / 100.0);
+}
+
+void MainWindow::slot_seek_video_position(int position)
+{
+    ui->widgetOpenGLPlayer->seek(position);
 }
 

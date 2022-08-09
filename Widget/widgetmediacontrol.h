@@ -22,15 +22,15 @@ private slots:
 
     void slot_volume_value_change(int volume);
 
-    void slot_get_media_duration(int64_t duration);
+    void slot_init_media_duration(int64_t duration, double timebase);
 
-    void slot_current_video_frame_time(float time);
+    void slot_thread_current_video_frame_time(int64_t pts, float timebase);
 
 private:
     Ui::WidgetMediaControl *ui;
 
     // 视频时长
-    int64_t mMediaDuration = 0;
+    int64_t mMediaBaseDuration = 0;
 };
 
 #endif // WIDGETMEDIACONTROL_H

@@ -44,7 +44,7 @@ void WidgetPlayer::play(const QString &path)
     if (path.isEmpty()) return;
 
     // 线程更新视频界面
-    connect(this, &WidgetPlayer::sgl_thead_update_video_frame, this, [this] { update();}, Qt::QueuedConnection);
+    connect(this, &WidgetPlayer::sgl_thread_update_video_frame, this, [this] { update();}, Qt::QueuedConnection);
 
     mMediaPlayFlag = true;
 
@@ -95,6 +95,14 @@ void WidgetPlayer::setAudioVolume(qreal volume)
     mAudioVolume = volume;
     if (nullptr == mAudioOutput) return;
     mAudioOutput->setVolume(mAudioVolume);
+}
+
+void WidgetPlayer::seek(int position)
+{
+    mArriveTargetFrame = false;
+    qDebug() << "seek 1" << position;
+    mSeekDuration = position;
+    qDebug() << "seek 2" << mSeekDuration;
 }
 
 void WidgetPlayer::initializeGL()
@@ -270,6 +278,10 @@ void WidgetPlayer::parse(const QString &path)
                 return;
             }
 
+            int32_t duration = formatCtx->streams[i]->duration;
+            // 初始化界面视频时长
+            emit AppSignal::getInstance()->sgl_init_media_duration(duration, (double)codeCtxVideo->pkt_timebase.num / codeCtxVideo->pkt_timebase.den);
+
             // 存在视频流，准备播放
             auto funcPlayVideo= std::bind(&WidgetPlayer::playVideoFrame, this);
             std::thread threadPlayVideo(funcPlayVideo);
@@ -309,16 +321,14 @@ void WidgetPlayer::parse(const QString &path)
         }
     }
 
-    int32_t duration = formatCtx->duration * 1.0 / AV_TIME_BASE;
-
-    // 视频时长
-    emit AppSignal::getInstance()->sgl_get_media_duration(duration);
-
     auto sampleSize = av_get_bytes_per_sample(AV_SAMPLE_FMT_FLT);
     // 分配一个packet
     AVPacket *packet = av_packet_alloc();
     AVFrame *frame = av_frame_alloc();
     int milliseconds = 0;
+
+    bool seekVideoFlag = false;
+    bool seekAudioFlag = false;
 
     std::mutex mutexParse;
     std::condition_variable cvParse;
@@ -328,8 +338,24 @@ void WidgetPlayer::parse(const QString &path)
         std::unique_lock<std::mutex> lock(mutexParse);
         if(cvParse.wait_for(lock, std::chrono::milliseconds(milliseconds)) == std::cv_status::timeout)
         {
+            if (mSeekDuration >= 0)
+            {
+                // 清空已经读取的帧数据
+                avcodec_flush_buffers(codeCtxVideo);
+                avcodec_flush_buffers(codeCtxAudio);
+                avformat_flush(formatCtx);
+
+                int ret = av_seek_frame(formatCtx, videoStreamIndex, mSeekDuration , AVSEEK_FLAG_FRAME);
+                if (ret >= 0) mSeekDuration = -1;
+                else qDebug() << "seek video failed";
+
+                seekVideoFlag = true;
+                seekAudioFlag = true;
+            }
+
             ret = av_read_frame(formatCtx, packet);
             if (ret < 0) break;
+
             if (packet->stream_index == videoStreamIndex)
             {
                 ret = avcodec_send_packet(codeCtxVideo, packet);
@@ -355,7 +381,18 @@ void WidgetPlayer::parse(const QString &path)
                     }
 
                     frame->pts = frame->best_effort_timestamp;
-                    if (mBeginTimeStamp < 0) mBeginTimeStamp = frame->pts;
+                    if (mBeginVideoTimeStamp < 0)
+                    {
+                        mBeginVideoTimeStamp = frame->pts;
+                        qDebug() << "begin video time stamp " << mBeginVideoTimeStamp;
+                    }
+
+                    // 记录跳转位置
+                    if (seekVideoFlag)
+                    {
+                        mSeekVideoFrameDuration = frame->pts - mBeginVideoTimeStamp;
+                        seekVideoFlag = false;
+                    }
 
                     if (nullptr == pSwsCtx)
                     {
@@ -369,7 +406,7 @@ void WidgetPlayer::parse(const QString &path)
                     uint8_t *d2 = new uint8_t[frame->linesize[0] * pixHeight / 4];
                     uint8_t *d3 = new uint8_t[frame->linesize[0] * pixHeight / 4];
 
-                    VideoFrame videoFrame = { frame->pts - mBeginTimeStamp, pixWidth, pixHeight, sampleSize, 0, d1, 0, 0, 0, d2, 0, 0, 0, d3, 0, 0, 0 };
+                    VideoFrame videoFrame = { frame->pts - mBeginVideoTimeStamp, pixWidth, pixHeight, sampleSize, 0, d1, 0, 0, 0, d2, 0, 0, 0, d3, 0, 0, 0 };
                     if (frame->format == AV_PIX_FMT_YUV420P)
                     {
                         memcpy(d1, frame->data[0], frame->linesize[0] * pixHeight);
@@ -406,7 +443,9 @@ void WidgetPlayer::parse(const QString &path)
 
                     // 根据实际数量，动态修改等待时间
                     size_t size = mQueueVideoFrame.size();
-                    milliseconds = (int)size * 100 * frame->pkt_duration * (double)codeCtxVideo->pkt_timebase.num / codeCtxVideo->pkt_timebase.den;
+
+                    // 60 参数，保证队列中大概保持在 10 条数据左右
+                    milliseconds = (int)size * 20 * frame->pkt_duration * (double)codeCtxVideo->pkt_timebase.num / codeCtxVideo->pkt_timebase.den;
 
                     mQueueVideoFrame.push(videoFrame);
 
@@ -444,6 +483,19 @@ void WidgetPlayer::parse(const QString &path)
 
                     frame->pts = frame->best_effort_timestamp;
 
+                    if (mBeginAudioTimeStamp < 0)
+                    {
+                        mBeginAudioTimeStamp = frame->pts;
+                        qDebug() << "begin audio time stamp " << mBeginAudioTimeStamp;
+                    }
+
+                    // 记录跳转位置
+                    if (seekAudioFlag)
+                    {
+                        mSeekAudioFrameDuration = frame->pts - mBeginAudioTimeStamp;
+                        seekAudioFlag = false;
+                    }
+
                     if (frame->best_effort_timestamp < 0)
                     {
                         av_frame_unref(frame);
@@ -463,7 +515,7 @@ void WidgetPlayer::parse(const QString &path)
                         break;
                     }
 
-                    AudioFrame audio = { frame->pts, bufsize, 0, buf };
+                    AudioFrame audio = { frame->pts - mBeginAudioTimeStamp, bufsize, 0, buf };
                     audio.timebase = (double)codeCtxAudio->pkt_timebase.num / codeCtxAudio->pkt_timebase.den;
                     mQueueAudioFrame.push(audio);
                     
@@ -530,8 +582,7 @@ void WidgetPlayer::playVideoFrame()
         uint64_t time = frame.pts * frame.timebase * 1000;
 
         if (mStartTimeStamp == 0) mStartTimeStamp = currentTimeStamp - time;
-
-        if ((currentTimeStamp - mStartTimeStamp) < time) continue;
+        if ((mSeekVideoFrameDuration < 0) && ((currentTimeStamp - mStartTimeStamp) < time)) continue;
 
         mQueueVideoFrame.wait_and_pop();
 
@@ -559,10 +610,20 @@ void WidgetPlayer::playVideoFrame()
         mCurrentVideoFrame = frame;
         lock.unlock();
 
-        emit sgl_thead_update_video_frame();
+        emit sgl_thread_update_video_frame();
+
+        if (mSeekVideoFrameDuration == frame.pts)
+        {
+            mSeekVideoFrameDuration = -1;
+            mStartTimeStamp = 0;
+            mArriveTargetFrame = true;
+        }
 
         // 更新视频当前播放时长（frame . pts 不一定从 0 开始）
-        emit AppSignal::getInstance()->sgl_current_video_frame_time(frame.pts * frame.timebase);
+        if ((mSeekVideoFrameDuration < 0) && mArriveTargetFrame)
+        {
+            emit AppSignal::getInstance()->sgl_thread_current_video_frame_time(frame.pts, frame.timebase);
+        }
     }
 
     qDebug() << "play video over ";
@@ -599,8 +660,15 @@ void WidgetPlayer::playAudioFrame()
         uint64_t time = frame.pts * frame.timebase * 1000;
         if (mStartTimeStamp == 0) mStartTimeStamp = currentTimeStamp - time;
 
-        // 判断是否可以播放该帧了
-        if ((currentTimeStamp - mStartTimeStamp) < time) continue;
+        // 判断是否可以播放该帧了(也判断是否需要跳过)
+        if ((mSeekAudioFrameDuration < 0) && ((currentTimeStamp - mStartTimeStamp) < time)) continue;
+
+        // qDebug() << "play video frame " << frame.pts;
+
+        if (mSeekAudioFrameDuration == frame.pts)
+        {
+            mSeekAudioFrameDuration = -1;
+        }
 
         mQueueAudioFrame.wait_and_pop();
 
@@ -624,5 +692,5 @@ void WidgetPlayer::playAudioFrame()
 
 uint64_t WidgetPlayer::getCurrentMillisecond()
 {
-    return (double)std::chrono::system_clock::now().time_since_epoch().count() / std::chrono::system_clock::period::den * std::chrono::system_clock::period::num * 1000;
+    return std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch()).count();
 }

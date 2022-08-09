@@ -24,11 +24,14 @@ signals:
     // 音量改变
     void sgl_change_audio_volume(int volume);
 
-    // 视频时长
-    void sgl_get_media_duration(int64_t duration);
+    // 视频时长 ( duration 是用于计算时长和跳转，timebase 是用于计算时长的，此处需要分开)
+    void sgl_init_media_duration(int64_t duration, double timebase);
 
     // 视频当前播放帧
-    void sgl_current_video_frame_time(float time);
+    void sgl_thread_current_video_frame_time(int64_t pts, float timebase);
+
+    // 视频播放位置跳转
+    void sgl_seek_video_position(int position);
 
 };
 

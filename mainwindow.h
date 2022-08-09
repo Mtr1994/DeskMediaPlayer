@@ -24,6 +24,8 @@ private slots:
 
     void slot_change_audio_volume(int volume);
 
+    void slot_seek_video_position(int position);
+
 private:
     Ui::MainWindow *ui;
 };
