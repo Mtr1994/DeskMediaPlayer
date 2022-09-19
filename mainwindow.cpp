@@ -36,6 +36,6 @@ void MainWindow::init()
     resize(width, height);
 
     // 默认测试播放
-    ui->widgetOpenGLPlayer->play("C:/Users/admin/Desktop/videos/ds.mov");
+    ui->widgetOpenGLPlayer->play("C:/Users/admin/Desktop/videos/jgdy.mpg");
 }
 
