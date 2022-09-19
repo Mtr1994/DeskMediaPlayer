@@ -1,4 +1,4 @@
-#ifndef MAINWINDOW_H
+﻿#ifndef MAINWINDOW_H
 #define MAINWINDOW_H
 
 #include <QMainWindow>
@@ -16,6 +16,19 @@ public:
     ~MainWindow();
 
     void init();
+
+
+protected:
+    void keyPressEvent(QKeyEvent *event);
+
+private slots:
+    void slot_start_play_video();
+
+    void slot_pause_play_video();
+
+    void slot_change_audio_volume(int volume);
+
+    void slot_seek_video_position(int position);
 
 private:
     Ui::MainWindow *ui;

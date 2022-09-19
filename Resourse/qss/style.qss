@@ -256,7 +256,7 @@ QSlider::handle:horizontal
     background-color: #fefefe;
     width: 1.2em;
     margin: -0.5em;
-    border-radius: 0.6em;
+    border-radius: 0.56em;
 }
 
 QSlider::handle:horizontal:hover

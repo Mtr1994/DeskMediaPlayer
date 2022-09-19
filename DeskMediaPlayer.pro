@@ -32,17 +32,22 @@ DEFINES += QT_DEPRECATED_WARNINGS
 #DEFINES += QT_DISABLE_DEPRECATED_BEFORE=0x060000    # disables all the APIs deprecated before Qt 6.0.0
 
 INCLUDEPATH += $$PWD/Sdk/ffmpeg/include
+
 DESTDIR = ../output
 
 SOURCES += \
+    Configure/softconfig.cpp \
     Player/widgetplayer.cpp \
+    Public/appsignal.cpp \
     Widget/widgetmediacontrol.cpp \
     main.cpp \
     mainwindow.cpp
 
 HEADERS += \
     Common/common.h \
+    Configure/softconfig.h \
     Player/widgetplayer.h \
+    Public/appsignal.h \
     Public/threadsafequeue.h \
     Widget/widgetmediacontrol.h \
     mainwindow.h

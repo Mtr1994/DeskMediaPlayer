@@ -30,8 +30,14 @@ public:
     // 停止播放
     void stop();
 
+    // 设置音量
+    void setAudioVolume(qreal volume);
+
+    // 视频跳转
+    void seek(int position);
+
 signals:
-    void sgl_thead_update_video_frame();
+    void sgl_thread_update_video_frame();
 
 protected:
     void initializeGL();
@@ -81,9 +87,26 @@ private:
     int mSampleSize = 0;
     int mSampleRate = 0;
     int mAudioChannles = 0;
+    int mAudioSampleFormat = 0;
+
+    // 视频跳转位置
+    int64_t mSeekDuration = -1;
+
+    // 是否已经播放到索引帧
+    bool mArriveTargetFrame = true;
+
+    // 当前需要跳转的位置 （pts）
+    int64_t mSeekVideoFrameDuration = -1;
+    int64_t mSeekAudioFrameDuration = -1;
 
     // 视频开始播放的时间戳
-    uint64_t mStartTimeStamp = 0;;
+    int64_t mStartTimeStamp = 0;
+
+    // 视频第一帧的时间戳
+    int64_t mBeginVideoTimeStamp = -1;
+
+    // 音频第一帧的时间戳
+    int64_t mBeginAudioTimeStamp = -1;
 
     QAudioOutput* mAudioOutput = nullptr;
     qreal mAudioVolume = 0.36;
@@ -92,8 +115,14 @@ private:
     // 播放锁
     std::mutex mMutexPlayFrame;
 
-    // 播放状态
+    // 播放器状态
     bool mMediaPlayFlag = false;
+
+    // 播放状态
+    bool mMediaPauseFlag = false;
+
+    // 当前视频路径
+    QString mMediaPath;
 };
 
 #endif // WIDGETPLAYER_H

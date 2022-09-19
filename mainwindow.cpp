@@ -1,8 +1,13 @@
 ﻿#include "mainwindow.h"
 #include "ui_mainwindow.h"
+#include "Public/appsignal.h"
+#include "Configure/softconfig.h"
 
 #include <QScreen>
 #include <Windows.h>
+#include <QKeyEvent>
+#include <QFileDialog>
+#include <QStandardPaths>
 
 MainWindow::MainWindow(QWidget *parent)
     : QMainWindow(parent)
@@ -12,11 +17,12 @@ MainWindow::MainWindow(QWidget *parent)
 
     init();
 
-    setWindowTitle("木头人视频播放器");
+    setWindowTitle("Mtr1994 视频播放器");
 }
 
 MainWindow::~MainWindow()
 {
+    SoftConfig::getInstance()->setValue("Media", "path", "");
     delete ui;
 }
 
@@ -35,7 +41,45 @@ void MainWindow::init()
 
     resize(width, height);
 
+    connect(AppSignal::getInstance(), &AppSignal::sgl_start_play_video, this, &MainWindow::slot_start_play_video);
+    connect(AppSignal::getInstance(), &AppSignal::sgl_pause_play_video, this, &MainWindow::slot_pause_play_video);
+    connect(AppSignal::getInstance(), &AppSignal::sgl_change_audio_volume, this, &MainWindow::slot_change_audio_volume);
+    connect(AppSignal::getInstance(), &AppSignal::sgl_seek_video_position, this, &MainWindow::slot_seek_video_position);
+
     // 默认测试播放
-    ui->widgetOpenGLPlayer->play("C:/Users/admin/Desktop/videos/jgdy.mpg");
+    ui->widgetOpenGLPlayer->play(SoftConfig::getInstance()->getValue("Media", "path"));
 }
 
+void MainWindow::slot_start_play_video()
+{
+    ui->widgetOpenGLPlayer->start();
+}
+
+void MainWindow::slot_pause_play_video()
+{
+    ui->widgetOpenGLPlayer->pause();
+}
+
+void MainWindow::slot_change_audio_volume(int volume)
+{
+    ui->widgetOpenGLPlayer->setAudioVolume(volume * 1.0 / 100.0);
+}
+
+void MainWindow::slot_seek_video_position(int position)
+{
+    ui->widgetOpenGLPlayer->seek(position);
+}
+
+void MainWindow::keyPressEvent(QKeyEvent *event)
+{
+    if(event->modifiers() == Qt::Modifier::CTRL)
+    {
+        if (event->key() == Qt::Key_O)
+        {
+            QString fileName = QFileDialog::getOpenFileName(nullptr, tr("选择视频文件"), QStandardPaths::writableLocation(QStandardPaths::DesktopLocation), tr("视频文件 (*.mp4 *.mkv *.avi *.mov *.flv *.wmv *.mpg)"));
+            if (fileName.isEmpty()) return;
+
+            ui->widgetOpenGLPlayer->play(fileName);
+        }
+    }
+}
