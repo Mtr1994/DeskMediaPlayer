@@ -57,6 +57,8 @@ void WidgetPlayer::play(const QString &path)
 
     if (mMediaPath.isEmpty()) return;
 
+    stop();
+
     // 线程更新视频界面
     connect(this, &WidgetPlayer::sgl_thread_update_video_frame, this, [this] { update();}, Qt::QueuedConnection);
 
@@ -545,7 +547,7 @@ void WidgetPlayer::parse(const QString &path)
                     if (frame->best_effort_timestamp < 0)
                     {
                         av_frame_unref(frame);
-                        break;
+                        continue;
                     }
 
                     swrCtx = swr_alloc_set_opts(nullptr, frame->channel_layout, AV_SAMPLE_FMT_FLT, codeCtxAudio->sample_rate, codeCtxAudio->channel_layout, codeCtxAudio->sample_fmt, codeCtxAudio->sample_rate, 0, nullptr);
