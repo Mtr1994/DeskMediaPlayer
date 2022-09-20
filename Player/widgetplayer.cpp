@@ -26,6 +26,8 @@ WidgetPlayer::WidgetPlayer(QWidget *parent) : QOpenGLWidget(parent)
 {
     mCurrentVideoFrame.pts = -1;
     mCurrentAudioFrame.pts = -1;
+
+    connect(this, &WidgetPlayer::sgl_thread_media_play_stop, this, &WidgetPlayer::slot_thread_media_play_stop, Qt::QueuedConnection);
 }
 
 WidgetPlayer::~WidgetPlayer()
@@ -43,9 +45,17 @@ void WidgetPlayer::play(const QString &path)
 {
     mMediaPath = path;
 
-    stop();
+    if (mMediaPlayFlag)
+    {
+        stop();
 
-    if (path.isEmpty()) return;
+        auto funcWait = std::bind(&WidgetPlayer::waitMediaPlayStop, this);
+        std::thread threadWait(funcWait);
+        threadWait.detach();
+        return;
+    }
+
+    if (mMediaPath.isEmpty()) return;
 
     // 线程更新视频界面
     connect(this, &WidgetPlayer::sgl_thread_update_video_frame, this, [this] { update();}, Qt::QueuedConnection);
@@ -74,6 +84,14 @@ void WidgetPlayer::pause()
 void WidgetPlayer::stop()
 {
     mMediaPlayFlag = false;
+    mMediaPauseFlag = false;
+    mArriveTargetFrame = true;
+    mSeekDuration = -1;
+    mSeekVideoFrameDuration = -1;
+    mSeekAudioFrameDuration = -1;
+    mStartTimeStamp = 0;
+    mBeginVideoTimeStamp = -1;
+    mBeginAudioTimeStamp = -1;
 
     while (!mQueueVideoFrame.empty())
     {
@@ -221,6 +239,9 @@ void WidgetPlayer::resizeGL(int w, int h)
 
 void WidgetPlayer::parse(const QString &path)
 {
+    qDebug() << "parse media begin ";
+    mPraseThreadFlag = true;
+
     //输入输出封装上下文
     AVFormatContext *formatCtx = nullptr;
 
@@ -240,6 +261,7 @@ void WidgetPlayer::parse(const QString &path)
     if (ret < 0)
     {
         printf("Could not open input file \n");
+        mPraseThreadFlag = false;
         return;
     }
 
@@ -248,12 +270,14 @@ void WidgetPlayer::parse(const QString &path)
     if (ret < 0)
     {
         printf("Failed to retrieve input stream information\n");
+        mPraseThreadFlag = false;
         return;
     }
 
     if (formatCtx->nb_streams == 0)
     {
         printf("can not find stream\n");
+        mPraseThreadFlag = false;
         return;
     }
 
@@ -266,7 +290,11 @@ void WidgetPlayer::parse(const QString &path)
 
             videoStreamIndex = i;
             AVCodecID codecid = formatCtx->streams[i]->codecpar->codec_id;
-            if (codecid == AV_CODEC_ID_NONE) return;
+            if (codecid == AV_CODEC_ID_NONE)
+            {
+                mPraseThreadFlag = false;
+                return;
+            }
 
             ///查找解码器
             pCodecVideo = avcodec_find_decoder(codecid);
@@ -280,6 +308,7 @@ void WidgetPlayer::parse(const QString &path)
             if (avcodec_open2(codeCtxVideo, pCodecVideo, NULL) < 0)
             {
                 printf("Could not open codec.");
+                mPraseThreadFlag = false;
                 return;
             }
 
@@ -316,8 +345,10 @@ void WidgetPlayer::parse(const QString &path)
             codeCtxAudio->pkt_timebase = formatCtx->streams[i]->time_base;
 
             ///打开解码器
-            if (avcodec_open2(codeCtxAudio, pCodecAudio, NULL) < 0) {
+            if (avcodec_open2(codeCtxAudio, pCodecAudio, NULL) < 0)
+            {
                 printf("Could not open codec.");
+                mPraseThreadFlag = false;
                 return;
             }
 
@@ -347,7 +378,6 @@ void WidgetPlayer::parse(const QString &path)
 
     while (mMediaPlayFlag)
     {
-        if (mMediaPath != path) break;
         std::unique_lock<std::mutex> lock(mutexParse);
         if(cvParse.wait_for(lock, std::chrono::milliseconds(milliseconds)) == std::cv_status::timeout)
         {
@@ -583,11 +613,15 @@ void WidgetPlayer::parse(const QString &path)
     avcodec_free_context(&codeCtxVideo);
     avcodec_free_context(&codeCtxAudio);
 
+    mPraseThreadFlag = false;
+
     qDebug() << "parse media over ";
 }
 
 void WidgetPlayer::playVideoFrame()
 {
+    qDebug() << "parse video begin ";
+    mPlayVideoThreadFlag = true;
     while (mMediaPlayFlag)
     {
         VideoFrame frame;
@@ -642,11 +676,15 @@ void WidgetPlayer::playVideoFrame()
         }
     }
 
+    mPlayVideoThreadFlag = false;
+
     qDebug() << "play video over ";
 }
 
 void WidgetPlayer::playAudioFrame()
 {
+    qDebug() << "parse audio begin ";
+    mPlayAudioThreadFlag = true;
     QAudioFormat audioFormat;
     audioFormat.setSampleRate(mSampleRate);
     audioFormat.setChannelCount(mAudioChannles);
@@ -703,10 +741,30 @@ void WidgetPlayer::playAudioFrame()
         }
     }
 
+    mPlayAudioThreadFlag = false;
     qDebug() << "play audio over ";
+}
+
+void WidgetPlayer::waitMediaPlayStop()
+{
+    while (true)
+    {
+        if ((!mPraseThreadFlag) && (!mPlayVideoThreadFlag) && (!mPlayAudioThreadFlag))
+        {
+            break;
+        }
+       // std::this_thread::sleep_for(std::chrono::milliseconds(20));
+    }
+
+    emit sgl_thread_media_play_stop();
 }
 
 uint64_t WidgetPlayer::getCurrentMillisecond()
 {
     return std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch()).count();
+}
+
+void WidgetPlayer::slot_thread_media_play_stop()
+{
+    play(mMediaPath);
 }

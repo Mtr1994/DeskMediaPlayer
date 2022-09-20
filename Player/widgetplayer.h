@@ -38,6 +38,7 @@ public:
 
 signals:
     void sgl_thread_update_video_frame();
+    void sgl_thread_media_play_stop();
 
 protected:
     void initializeGL();
@@ -54,7 +55,13 @@ private:
     // 音频播放线程
     void playAudioFrame();
 
+    // 等待当前播放线程结束
+    void waitMediaPlayStop();
+
     uint64_t getCurrentMillisecond();
+
+private slots:
+    void slot_thread_media_play_stop();
 
 private:
     QOpenGLShaderProgram mShaderProgram;
@@ -123,6 +130,11 @@ private:
 
     // 当前视频路径
     QString mMediaPath;
+
+    // 解析、播放视频、播放音频状态
+    volatile bool mPraseThreadFlag = false;
+    volatile bool mPlayVideoThreadFlag = false;
+    volatile bool mPlayAudioThreadFlag = false;
 };
 
 #endif // WIDGETPLAYER_H

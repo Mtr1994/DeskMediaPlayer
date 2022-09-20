@@ -75,6 +75,8 @@ void WidgetMediaControl::slot_init_media_duration(int64_t duration, double timeb
 
     qDebug() << "init duration " << duration;
 
+    ui->btnPlay->setChecked(true);
+
     mMediaTimeBase = timebase;
     mMediaBaseDuration = duration * timebase;
     ui->lbDurationLeft->setText(QString("%1:%2:%3").arg(mMediaBaseDuration / 3600, 2, 10, QLatin1Char('0')).arg(mMediaBaseDuration / 60, 2, 10, QLatin1Char('0')).arg(mMediaBaseDuration % 60, 2, 10, QLatin1Char('0')));
