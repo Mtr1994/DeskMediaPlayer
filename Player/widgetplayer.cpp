@@ -21,6 +21,7 @@ extern "C"
 
 // test
 #include <QDebug>
+#include <QDateTime>
 
 WidgetPlayer::WidgetPlayer(QWidget *parent) : QOpenGLWidget(parent)
 {
@@ -95,13 +96,23 @@ void WidgetPlayer::stop()
     mBeginVideoTimeStamp = -1;
     mBeginAudioTimeStamp = -1;
 
+    mTextureWidth = 0;
+    mTextureHeight = 0;
+
+    mSampleSize = 0;
+    mSampleRate = 0;
+    mAudioChannles = 0;
+    mAudioSampleFormat = 0;
+
+    mPraseThreadFlag = false;
+    mPlayVideoThreadFlag = false;
+    mPlayAudioThreadFlag = false;
+
     while (!mQueueVideoFrame.empty())
     {
         VideoFrame frame;
         mQueueVideoFrame.wait_and_pop(frame);
-        delete [] frame.d1;
-        delete [] frame.d2;
-        delete [] frame.d3;
+        delete [] frame.buffer;
         mQueueVideoFrame.wait_and_pop();
     }
 
@@ -124,119 +135,142 @@ void WidgetPlayer::setAudioVolume(qreal volume)
 void WidgetPlayer::seek(int position)
 {
     mArriveTargetFrame = false;
-    qDebug() << "seek 1" << position;
-    mSeekDuration = position;
-    qDebug() << "seek 2" << mSeekDuration;
+    //qDebug() << "seek 1" << position;
+    mSeekDuration = position + mBeginVideoTimeStamp;
+    //qDebug() << "seek 2" << mSeekDuration;
 }
 
 void WidgetPlayer::initializeGL()
 {
+    // 不调用这句话，就不能使用 gl 开头的函数，程序会崩溃
     initializeOpenGLFunctions();
 
-    mShaderProgram.addCacheableShaderFromSourceFile(QOpenGLShader::Vertex, ":/Resourse/shader/shader.vert");
-    mShaderProgram.addCacheableShaderFromSourceFile(QOpenGLShader::Fragment, ":/Resourse/shader/shader.frag");
-    mShaderProgram.link();
+    // 着色器文件不能使用 UTF-8-BOM 编码，会报错，只能采用 UTF-8 编码
 
-    GLfloat points[]
+    // 加载顶点着色器
+    bool status = mShaderProgram.addShaderFromSourceFile(QOpenGLShader::Vertex, ":/Resource/shader/shader.vert");
+    if (!status)
     {
-        -1.0f, 1.0f,
-         1.0f, 1.0f,
-         1.0f, -1.0f,
-        -1.0f, -1.0f,
+        qDebug() << "parse vertex shader fail " << mShaderProgram.log();
+        return;
+    }
 
-        0.0f,0.0f,
-        1.0f,0.0f,
-        1.0f,1.0f,
-        0.0f,1.0f
-    };
+    // 加载片段着色器
+    status= mShaderProgram.addShaderFromSourceFile(QOpenGLShader::Fragment, ":/Resource/shader/shader.frag");
+    if (!status)
+    {
+        qDebug() << "parse fragment shader fail " << mShaderProgram.log();
+        return;
+    }
 
-    mVertexBufferObject.create();
-    mVertexBufferObject.bind();
-    mVertexBufferObject.allocate(points, sizeof(points));
+    // 链接程序
+    status = mShaderProgram.link();
+    if (!status)
+    {
+        qDebug() << "link shader fail " << mShaderProgram.log();
+        return;
+    }
 
-    glGenTextures(3, mTextureArray);
+    glUseProgram(mShaderProgram.programId());
+
+    {
+        // 上下翻转 用 1 减去 纹理 坐标 T
+        // 左右翻转 用 1 减去 纹理 坐标 S
+        float vertices[]
+        {
+            // ---- 位置 ----       - 纹理坐标 -
+             1.0f,  1.0f, 0.0f,    1.0f, 0.0f,   // 左下
+             1.0f, -1.0f, 0.0f,    1.0f, 1.0f,   // 左上
+            -1.0f, -1.0f, 0.0f,    0.0f, 1.0f,   // 右上
+            -1.0f,  1.0f, 0.0f,    0.0f, 0.0f    // 右下
+        };
+
+        unsigned int indices[] = { 0, 1, 2, 3 };
+
+        unsigned int VBO, VAO, EBO;
+        glGenVertexArrays(1, &VAO);
+        glBindVertexArray(VAO);
+
+        glGenBuffers(1, &VBO);
+        glBindBuffer(GL_ARRAY_BUFFER, VBO);
+        glBufferData(GL_ARRAY_BUFFER, sizeof(vertices), vertices, GL_STATIC_DRAW);
+
+        glGenBuffers(1, &EBO);
+        glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, EBO);
+        glBufferData(GL_ELEMENT_ARRAY_BUFFER, sizeof(indices), indices, GL_STATIC_DRAW);
+
+        // position attribute
+        glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 5 * sizeof(float), (void*)0);
+        glEnableVertexAttribArray(0);
+        // texture coord attribute
+        glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, 5 * sizeof(float), (void*)(3 * sizeof(float)));
+        glEnableVertexAttribArray(1);
+
+        // load and create a texture
+        // -------------------------
+        glActiveTexture(GL_TEXTURE0);
+        glGenTextures(1, &mTextureID);
+        glBindTexture(GL_TEXTURE_2D, mTextureID);
+
+        unsigned int texture = glGetUniformLocation(mShaderProgram.programId(), "ourTexture");
+        if (texture < 0)
+        {
+            qDebug() << "can not find uniform ourTexture";
+            return;
+        }
+        // 赋值为 0 是因为这里启用的纹理是 GL_TEXTURE0
+        glUniform1i(texture, 0);
+
+        // set texture filtering parameters
+        // 使用 GL_LINEAR_MIPMAP_LINEAR 的时候，必须调用  glGenerateMipmap 函数
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+
+        // set the texture wrapping parameters
+        // set texture wrapping to GL_REPEAT (default wrapping method)
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
+
+        // 解除绑定，防止其它操作影响到这个纹理
+        glBindTexture(GL_TEXTURE_2D, 0);
+    }
 }
 
 void WidgetPlayer::paintGL()
 {
-    glViewport((this->width() - mVideoWidth) / 2.0, (this->height() - mVideoHeight) / 2.0, mVideoWidth, mVideoHeight);
+    glViewport((width() - mTextureWidth) / 2.0, (height() - mTextureHeight) / 2.0, mTextureWidth, mTextureHeight);
+    if (mCurrentVideoFrame.pts < 0)
+    {
+        glBindTexture(GL_TEXTURE_2D, mTextureID);
+        glDrawElements(GL_QUADS, 4, GL_UNSIGNED_INT, 0);
+        return;
+    }
 
     glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
-
-    if (mCurrentVideoFrame.pts < 0) return;
-
-    mShaderProgram.bind();
-    mVertexBufferObject.bind();
-    mShaderProgram.enableAttributeArray("vertexIn");
-    mShaderProgram.enableAttributeArray("textureIn");
-    mShaderProgram.setAttributeBuffer("vertexIn", GL_FLOAT, 0, 2, 2 * sizeof(GLfloat));
-    mShaderProgram.setAttributeBuffer("textureIn", GL_FLOAT, 2 * 4 * sizeof(GLfloat), 2, 2 * sizeof(GLfloat));
+    glDisable(GL_DEPTH_TEST);
 
     std::unique_lock<std::mutex> lock(mMutexPlayFrame);
 
-    glActiveTexture(GL_TEXTURE0);
-    glBindTexture(GL_TEXTURE_2D, mTextureArray[0]);
-    glPixelStorei(GL_UNPACK_ROW_LENGTH, mCurrentVideoFrame.linesize1);
-    glTexImage2D(GL_TEXTURE_2D, 0, GL_LUMINANCE, mCurrentVideoFrame.width1, mCurrentVideoFrame.height1, 0, GL_LUMINANCE, GL_UNSIGNED_BYTE, mCurrentVideoFrame.d1);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-
-    glActiveTexture(GL_TEXTURE1);
-    glBindTexture(GL_TEXTURE_2D, mTextureArray[1]);
-    glPixelStorei(GL_UNPACK_ROW_LENGTH, mCurrentVideoFrame.linesize2);
-    glTexImage2D(GL_TEXTURE_2D, 0, GL_LUMINANCE, mCurrentVideoFrame.width2, mCurrentVideoFrame.height2, 0, GL_LUMINANCE, GL_UNSIGNED_BYTE, mCurrentVideoFrame.d2);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-
-    glActiveTexture(GL_TEXTURE2);
-    glBindTexture(GL_TEXTURE_2D, mTextureArray[2]);
-    glPixelStorei(GL_UNPACK_ROW_LENGTH, mCurrentVideoFrame.linesize3);
-    glTexImage2D(GL_TEXTURE_2D, 0, GL_LUMINANCE, mCurrentVideoFrame.width3, mCurrentVideoFrame.height3, 0, GL_LUMINANCE, GL_UNSIGNED_BYTE, mCurrentVideoFrame.d3);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-
+    // 写入数据的时候，一定要先绑定纹理单元
+    glBindTexture(GL_TEXTURE_2D, mTextureID);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, mCurrentVideoFrame.width, mCurrentVideoFrame.height, 0, GL_RGB, GL_UNSIGNED_BYTE, mCurrentVideoFrame.buffer);
+    // 数据已经发给显卡，可以删除 CPU 中的数据
+    if (mCurrentVideoFrame.buffer)
+    {
+        delete [] mCurrentVideoFrame.buffer;
+        mCurrentVideoFrame.pts = -1;
+    }
     lock.unlock();
+    glGenerateMipmap(GL_TEXTURE_2D);
 
-    mShaderProgram.setUniformValue("textureY", 0);
-    mShaderProgram.setUniformValue("textureU", 1);
-    mShaderProgram.setUniformValue("textureV", 2);
-    glDrawArrays(GL_QUADS, 0, 4);
-
-    mShaderProgram.disableAttributeArray("vertexIn");
-    mShaderProgram.disableAttributeArray("textureIn");
-    mShaderProgram.release();
+    glDrawElements(GL_QUADS, 4, GL_UNSIGNED_INT, 0);
 }
 
 void WidgetPlayer::resizeGL(int w, int h)
 {
-    if(h <= 0) h = 1;
-
-    if (mCurrentVideoFrame.pts < 0)
-    {
-        mVideoWidth = 0;
-        mVideoHeight = 0;
-        return;
-    }
-
-    double rate = (double)mCurrentVideoFrame.height / mCurrentVideoFrame.width;
-    double widthSize = w;
-    double heightSize = w * rate;
-
-    if (h < heightSize)
-    {
-        heightSize = h;
-        widthSize = heightSize / rate;
-    }
-
-    mVideoWidth = widthSize;
-    mVideoHeight = heightSize;
+    Q_UNUSED(w); Q_UNUSED(h);
+    resizeVideo();
 }
 
 void WidgetPlayer::parse(const QString &path)
@@ -370,6 +404,7 @@ void WidgetPlayer::parse(const QString &path)
     // 分配一个packet
     AVPacket *packet = av_packet_alloc();
     AVFrame *frame = av_frame_alloc();
+
     int milliseconds = 0;
 
     bool seekVideoFlag = false;
@@ -386,8 +421,8 @@ void WidgetPlayer::parse(const QString &path)
             if (mSeekDuration >= 0)
             {
                 // 清空已经读取的帧数据
-                avcodec_flush_buffers(codeCtxVideo);
-                avcodec_flush_buffers(codeCtxAudio);
+                if (nullptr != codeCtxVideo) avcodec_flush_buffers(codeCtxVideo);
+                if (nullptr != codeCtxAudio) avcodec_flush_buffers(codeCtxAudio);
                 avformat_flush(formatCtx);
 
                 int ret = av_seek_frame(formatCtx, videoStreamIndex, mSeekDuration , AVSEEK_FLAG_FRAME);
@@ -444,50 +479,35 @@ void WidgetPlayer::parse(const QString &path)
 
                     if (nullptr == pSwsCtx)
                     {
-                        pSwsCtx = sws_getContext(codeCtxVideo->width, codeCtxVideo->height, (AVPixelFormat)frame->format, codeCtxVideo->width, codeCtxVideo->height, AV_PIX_FMT_YUV420P, SWS_BICUBIC, nullptr, nullptr, nullptr);
+                        pSwsCtx = sws_getContext(codeCtxVideo->width, codeCtxVideo->height, (AVPixelFormat)frame->format, codeCtxVideo->width, codeCtxVideo->height, AV_PIX_FMT_RGB24, SWS_BICUBIC, nullptr, nullptr, nullptr);
                     }
 
                     int pixWidth = frame->width;
                     int pixHeight = frame->height;
 
-                    uint8_t *d1 = new uint8_t[frame->linesize[0] * pixHeight];
-                    uint8_t *d2 = new uint8_t[frame->linesize[0] * pixHeight / 4];
-                    uint8_t *d3 = new uint8_t[frame->linesize[0] * pixHeight / 4];
+                    uint8_t *buffer = new uint8_t[frame->linesize[0] * pixHeight * 3];
+                    memset(buffer, 0, frame->linesize[0] * pixHeight * 3);
 
-                    VideoFrame videoFrame = { frame->pts - mBeginVideoTimeStamp, pixWidth, pixHeight, sampleSize, 0, d1, 0, 0, 0, d2, 0, 0, 0, d3, 0, 0, 0 };
-                    if (frame->format == AV_PIX_FMT_YUV420P)
+                    VideoFrame videoFrame = { frame->pts - mBeginVideoTimeStamp, pixWidth, pixHeight, sampleSize, 0, buffer, 0 };
+                    if (frame->format == AV_PIX_FMT_RGB24)
                     {
-                        memcpy(d1, frame->data[0], frame->linesize[0] * pixHeight);
-                        memcpy(d2, frame->data[1], frame->linesize[0] * pixHeight / 4);
-                        memcpy(d3, frame->data[2], frame->linesize[0] * pixHeight / 4);
-
+                        memcpy(buffer, frame->data[0], frame->linesize[0] * pixHeight * 3);
                         videoFrame.timebase = (double)codeCtxVideo->pkt_timebase.num / codeCtxVideo->pkt_timebase.den;
                     }
                     else
                     {
-                        uint8_t *data[AV_NUM_DATA_POINTERS] = { (uint8_t *)d1, (uint8_t *)d2, (uint8_t *)d3 };
-                        int ret = sws_scale(pSwsCtx, (uint8_t const * const *) frame->data, frame->linesize, 0, frame->height, data, frame->linesize);
+                        uint8_t *data[AV_NUM_DATA_POINTERS] = { buffer };
+                        int linesize[AV_NUM_DATA_POINTERS] = { pixWidth * 3, 0, 0, 0, 0, 0, 0, 0 };
+                        int ret = sws_scale(pSwsCtx, (uint8_t const * const *) frame->data, frame->linesize, 0, frame->height, data, linesize);
                         if (ret <= 0)
                         {
-                            memset(d1, 0, frame->linesize[0] * pixHeight);
-                            memset(d2, 0, frame->linesize[0] * pixHeight / 4);
-                            memset(d3, 0, frame->linesize[0] * pixHeight / 4);
+                            memset(buffer, 0, frame->linesize[0] * pixHeight * 3);
                         }
 
                         videoFrame.timebase = (double)codeCtxVideo->pkt_timebase.num / codeCtxVideo->pkt_timebase.den;
                     }
 
-                    videoFrame.width1 = pixWidth;
-                    videoFrame.height1 = pixHeight;
-                    videoFrame.linesize1 = frame->linesize[0];
-
-                    videoFrame.width2 = pixWidth / 2;
-                    videoFrame.height2 = pixHeight / 2;
-                    videoFrame.linesize2 = frame->linesize[1];
-
-                    videoFrame.width3 = pixWidth / 2;
-                    videoFrame.height3 = pixHeight / 2;
-                    videoFrame.linesize3 = frame->linesize[2];
+                    videoFrame.linesize = frame->linesize[0];
 
                     // 根据实际数量，动态修改等待时间
                     size_t size = mQueueVideoFrame.size();
@@ -622,10 +642,13 @@ void WidgetPlayer::parse(const QString &path)
 
 void WidgetPlayer::playVideoFrame()
 {
-    qDebug() << "parse video begin ";
+    qDebug() << "play video begin ";
     mPlayVideoThreadFlag = true;
     while (mMediaPlayFlag)
     {
+        // 解析结束且视频帧为空的时候，关闭播放线程
+        if (!mPraseThreadFlag && mQueueVideoFrame.empty()) break;
+
         VideoFrame frame;
         if (mQueueVideoFrame.empty() || mMediaPauseFlag) continue;
         mQueueVideoFrame.wait_and_pop(frame);
@@ -638,28 +661,9 @@ void WidgetPlayer::playVideoFrame()
 
         mQueueVideoFrame.wait_and_pop();
 
-        double rate = (double)frame.height / frame.width;
-        double widthSize = this->width();
-        double heightSize = this->width() * rate;
-
-        if (this->height() < heightSize)
-        {
-            heightSize = this->height();
-            widthSize = heightSize / rate;
-        }
-
-        mVideoWidth = widthSize;
-        mVideoHeight = heightSize;
-
         std::unique_lock<std::mutex> lock(mMutexPlayFrame);
-        if (mCurrentVideoFrame.pts > 0)
-        {
-            delete [] mCurrentVideoFrame.d1;
-            delete [] mCurrentVideoFrame.d2;
-            delete [] mCurrentVideoFrame.d3;
-        }
-
         mCurrentVideoFrame = frame;
+        resizeVideo();
         lock.unlock();
 
         emit sgl_thread_update_video_frame();
@@ -685,7 +689,7 @@ void WidgetPlayer::playVideoFrame()
 
 void WidgetPlayer::playAudioFrame()
 {
-    qDebug() << "parse audio begin ";
+    qDebug() << "play audio begin ";
     mPlayAudioThreadFlag = true;
     QAudioFormat audioFormat;
     audioFormat.setSampleRate(mSampleRate);
@@ -708,6 +712,9 @@ void WidgetPlayer::playAudioFrame()
     // 提取音频帧
     while (mMediaPlayFlag)
     {
+        // 解析结束且视频帧为空的时候，关闭播放线程
+        if (!mPraseThreadFlag && mQueueVideoFrame.empty()) break;
+
         AudioFrame frame;
         if (mQueueAudioFrame.empty() || mMediaPauseFlag) continue;
         mQueueAudioFrame.wait_and_pop(frame);
@@ -764,6 +771,33 @@ void WidgetPlayer::waitMediaPlayStop()
 uint64_t WidgetPlayer::getCurrentMillisecond()
 {
     return std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch()).count();
+}
+
+void WidgetPlayer::resizeVideo()
+{
+    int widgetWidth = width();
+    int widgetHeight = height();
+    if(widgetHeight <= 0) widgetHeight = 1;
+
+    if (mCurrentVideoFrame.width <= 0 || mCurrentVideoFrame.height <= 0)
+    {
+        mTextureWidth = 0;
+        mTextureHeight = 0;
+        return;
+    }
+
+    double rate = (double)mCurrentVideoFrame.height / mCurrentVideoFrame.width;
+    double widthSize = widgetWidth;
+    double heightSize = widgetWidth * rate;
+
+    if (widgetHeight < heightSize)
+    {
+        heightSize = widgetHeight;
+        widthSize = heightSize / rate;
+    }
+
+    mTextureWidth = widthSize;
+    mTextureHeight = heightSize;
 }
 
 void WidgetPlayer::slot_thread_media_play_stop()

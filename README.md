@@ -6,3 +6,9 @@
 ![GitHub](https://img.shields.io/github/license/Mtr1994/DeskMediaPlayer)
 
   视频播放器程序，使用 FFMPEG 框架编写
+
+
+
+#### 一、技术要点
+
+​	1、使用 `OpenGL` 绘制图像，通过 `FFMPEG` 将所有图片格式转换为 `RGB24` 格式

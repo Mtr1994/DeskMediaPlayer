@@ -5,14 +5,14 @@
 #include "Public/threadsafequeue.h"
 
 #include <QOpenGLWidget>
-#include <QOpenGLFunctions>
+#include <QOpenGLFunctions_3_3_Core>
 #include <QOpenGLShaderProgram>
 #include <QOpenGLBuffer>
 #include <mutex>
 
 class QAudioOutput;
 class QIODevice;
-class WidgetPlayer : public QOpenGLWidget, protected QOpenGLFunctions
+class WidgetPlayer : public QOpenGLWidget, protected QOpenGLFunctions_3_3_Core
 {
     Q_OBJECT
 public:
@@ -60,17 +60,22 @@ private:
 
     uint64_t getCurrentMillisecond();
 
+    void resizeVideo();
+
 private slots:
     void slot_thread_media_play_stop();
 
 private:
     QOpenGLShaderProgram mShaderProgram;
 
-    // VBO
-    QOpenGLBuffer mVertexBufferObject;
+    // 纹理对象
+    unsigned int mTextureID = -1;
 
-    // 纹理层
-    unsigned int mTextureArray[3] = { 0 };
+    // 纹理长度
+    int mTextureWidth = 0;
+
+    // 纹理高度
+    int mTextureHeight = 0;
 
     // 视频帧队列
     ThreadSafeQueue<VideoFrame> mQueueVideoFrame;
@@ -86,10 +91,6 @@ private:
 
     // 当前音频帧
     AudioFrame mCurrentAudioFrame;
-
-    // 视频展示尺寸
-    int mVideoWidth;
-    int mVideoHeight;
 
     int mSampleSize = 0;
     int mSampleRate = 0;

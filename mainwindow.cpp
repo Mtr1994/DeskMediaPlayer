@@ -2,6 +2,7 @@
 #include "ui_mainwindow.h"
 #include "Public/appsignal.h"
 #include "Configure/softconfig.h"
+#include "Dialog/dialogversion.h"
 
 #include <QScreen>
 #include <Windows.h>
@@ -17,7 +18,7 @@ MainWindow::MainWindow(QWidget *parent)
 
     init();
 
-    setWindowTitle("Mtr1994 视频播放器");
+    setWindowTitle("Mtr1994 Player");
 }
 
 MainWindow::~MainWindow()
@@ -40,6 +41,13 @@ void MainWindow::init()
     }
 
     resize(width, height);
+
+    connect(ui->actionOpen, &QAction::triggered, this, &MainWindow::slot_open_video_file);
+    connect(ui->actionQuit, &QAction::triggered, this, [this]{ this->close(); });
+
+    connect(ui->actionSetting, &QAction::triggered, this, []{ /* 还没写，哈哈 */});
+
+    connect(ui->actionAbout, &QAction::triggered, this, &MainWindow::slot_show_about_developer);
 
     connect(AppSignal::getInstance(), &AppSignal::sgl_start_play_video, this, &MainWindow::slot_start_play_video);
     connect(AppSignal::getInstance(), &AppSignal::sgl_pause_play_video, this, &MainWindow::slot_pause_play_video);
@@ -70,16 +78,27 @@ void MainWindow::slot_seek_video_position(int position)
     ui->widgetOpenGLPlayer->seek(position);
 }
 
+void MainWindow::slot_show_about_developer()
+{
+    DialogVersion dialog(this);
+    dialog.exec();
+}
+
+void MainWindow::slot_open_video_file()
+{
+    QString fileName = QFileDialog::getOpenFileName(nullptr, tr("选择视频文件"), QStandardPaths::writableLocation(QStandardPaths::DesktopLocation), tr("视频文件 (*.mp4 *.mkv *.avi *.mov *.flv *.wmv *.mpg)"));
+    if (fileName.isEmpty()) return;
+
+    ui->widgetOpenGLPlayer->play(fileName);
+}
+
 void MainWindow::keyPressEvent(QKeyEvent *event)
 {
     if(event->modifiers() == Qt::Modifier::CTRL)
     {
         if (event->key() == Qt::Key_O)
         {
-            QString fileName = QFileDialog::getOpenFileName(nullptr, tr("选择视频文件"), QStandardPaths::writableLocation(QStandardPaths::DesktopLocation), tr("视频文件 (*.mp4 *.mkv *.avi *.mov *.flv *.wmv *.mpg)"));
-            if (fileName.isEmpty()) return;
-
-            ui->widgetOpenGLPlayer->play(fileName);
+            emit ui->actionOpen->triggered(true);
         }
     }
 }

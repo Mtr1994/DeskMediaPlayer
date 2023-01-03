@@ -11,7 +11,7 @@ unix: QMAKE_LFLAGS += -no-pie
 
 # Qt 5.14 VERSION can only contains numbers, no any others type of character please
 # please do not put 0 before any version number, because this will cause a warnning on Qt 5.14
-win32:  VERSION = 21.5.9.1140                # major.minor.patch.build
+win32:  VERSION = 23.01.03.1806                # major.minor.patch.build
 else:   VERSION = 21.5.9                    # major.minor.patch
 
 QMAKE_TARGET_COPYRIGHT = mtr company Co., Ltd
@@ -37,6 +37,7 @@ DESTDIR = ../output
 
 SOURCES += \
     Configure/softconfig.cpp \
+    Dialog/dialogversion.cpp \
     Player/widgetplayer.cpp \
     Public/appsignal.cpp \
     Widget/widgetmediacontrol.cpp \
@@ -46,6 +47,7 @@ SOURCES += \
 HEADERS += \
     Common/common.h \
     Configure/softconfig.h \
+    Dialog/dialogversion.h \
     Player/widgetplayer.h \
     Public/appsignal.h \
     Public/threadsafequeue.h \
@@ -53,6 +55,7 @@ HEADERS += \
     mainwindow.h
 
 FORMS += \
+    Dialog/dialogversion.ui \
     Widget/widgetmediacontrol.ui \
     mainwindow.ui
 
@@ -64,7 +67,7 @@ qnx: target.path = /tmp/$${TARGET}/bin
 else: unix:!android: target.path = /opt/$${TARGET}/bin
 !isEmpty(target.path): INSTALLS += target
 
-RC_ICONS = ./Resourse/icon/icon.ico
+RC_ICONS = ./Resource/icon/icon.ico
 
 RESOURCES += \
     res.qrc

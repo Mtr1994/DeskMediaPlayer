@@ -30,6 +30,10 @@ private slots:
 
     void slot_seek_video_position(int position);
 
+    void slot_show_about_developer();
+
+    void slot_open_video_file();
+
 private:
     Ui::MainWindow *ui;
 };

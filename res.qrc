@@ -1,13 +1,13 @@
 <RCC>
     <qresource prefix="/">
-        <file>Resourse/icon/icon.ico</file>
-        <file>Resourse/qss/style.qss</file>
-        <file>Resourse/shader/shader.frag</file>
-        <file>Resourse/shader/shader.vert</file>
-        <file>Resourse/image/pause.svg</file>
-        <file>Resourse/image/play.svg</file>
-        <file>Resourse/image/play_next.svg</file>
-        <file>Resourse/image/play_previous.svg</file>
-        <file>Resourse/image/volume.svg</file>
+        <file>Resource/icon/icon.ico</file>
+        <file>Resource/qss/style.qss</file>
+        <file>Resource/shader/shader.frag</file>
+        <file>Resource/shader/shader.vert</file>
+        <file>Resource/image/pause.svg</file>
+        <file>Resource/image/play.svg</file>
+        <file>Resource/image/play_next.svg</file>
+        <file>Resource/image/play_previous.svg</file>
+        <file>Resource/image/volume.svg</file>
     </qresource>
 </RCC>

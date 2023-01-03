@@ -171,7 +171,7 @@
            <enum>Qt::NoContextMenu</enum>
           </property>
           <property name="styleSheet">
-           <string notr="true">image: url(:/Resourse/image/volume.svg);</string>
+           <string notr="true">image: url(:/Resource/image/volume.svg);</string>
           </property>
           <property name="text">
            <string/>
