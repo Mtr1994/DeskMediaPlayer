@@ -29,15 +29,16 @@ WidgetPlayer::WidgetPlayer(QWidget *parent) : QOpenGLWidget(parent)
     mCurrentAudioFrame.pts = -1;
 
     connect(this, &WidgetPlayer::sgl_thread_media_play_stop, this, &WidgetPlayer::slot_thread_media_play_stop, Qt::QueuedConnection);
+
+    // 线程更新视频界面
+    connect(this, &WidgetPlayer::sgl_thread_update_video_frame, this, [this] { update();}, Qt::QueuedConnection);
 }
 
 WidgetPlayer::~WidgetPlayer()
 {
-    //glDeleteBuffers();
-    //glDeleteProgram();
-
+    mMediaPath.clear();
     // 立即停止播放
-    stop();
+    clear();
 
     if (nullptr != mAudioOutput) delete mAudioOutput;
 }
@@ -45,11 +46,10 @@ WidgetPlayer::~WidgetPlayer()
 void WidgetPlayer::play(const QString &path)
 {
     mMediaPath = path;
-
+    qDebug() << "mMediaPlayFlag " << mMediaPlayFlag;
     if (mMediaPlayFlag)
     {
-        stop();
-
+        mMediaPlayFlag = false;
         auto funcWait = std::bind(&WidgetPlayer::waitMediaPlayStop, this);
         std::thread threadWait(funcWait);
         threadWait.detach();
@@ -58,12 +58,11 @@ void WidgetPlayer::play(const QString &path)
 
     if (mMediaPath.isEmpty()) return;
 
-    stop();
-
-    // 线程更新视频界面
-    connect(this, &WidgetPlayer::sgl_thread_update_video_frame, this, [this] { update();}, Qt::QueuedConnection);
+    clear();
 
     mMediaPlayFlag = true;
+
+    qDebug() << "start " << path;
 
     auto funcParse = std::bind(&WidgetPlayer::parse, this, std::placeholders::_1);
     std::thread threadParse(funcParse, path);
@@ -84,7 +83,7 @@ void WidgetPlayer::pause()
     mMediaPauseFlag = true;
 }
 
-void WidgetPlayer::stop()
+void WidgetPlayer::clear()
 {
     mMediaPlayFlag = false;
     mMediaPauseFlag = false;
@@ -103,10 +102,6 @@ void WidgetPlayer::stop()
     mSampleRate = 0;
     mAudioChannles = 0;
     mAudioSampleFormat = 0;
-
-    mPraseThreadFlag = false;
-    mPlayVideoThreadFlag = false;
-    mPlayAudioThreadFlag = false;
 
     while (!mQueueVideoFrame.empty())
     {
@@ -425,12 +420,20 @@ void WidgetPlayer::parse(const QString &path)
                 if (nullptr != codeCtxAudio) avcodec_flush_buffers(codeCtxAudio);
                 avformat_flush(formatCtx);
 
-                int ret = av_seek_frame(formatCtx, videoStreamIndex, mSeekDuration , AVSEEK_FLAG_FRAME);
-                if (ret >= 0) mSeekDuration = -1;
-                else qDebug() << "seek video failed";
-
-                seekVideoFlag = true;
-                seekAudioFlag = true;
+                int ret = av_seek_frame(formatCtx, videoStreamIndex, mSeekDuration, AVSEEK_FLAG_FRAME);
+                if (ret >= 0)
+                {
+                    mSeekDuration = -1;
+                    seekVideoFlag = true;
+                    seekAudioFlag = true;
+                }
+                else
+                {
+                    mArriveTargetFrame = true;
+                    mSeekDuration = -1;
+                    qDebug() << "seek video failed";
+                    continue;
+                }
             }
 
             ret = av_read_frame(formatCtx, packet);
@@ -685,6 +688,9 @@ void WidgetPlayer::playVideoFrame()
     mPlayVideoThreadFlag = false;
 
     qDebug() << "play video over ";
+
+    // 为了保证触发，视频和音频线程都发一次
+    //emit AppSignal::getInstance()->sgl_thread_finish_play_video();
 }
 
 void WidgetPlayer::playAudioFrame()
@@ -752,6 +758,9 @@ void WidgetPlayer::playAudioFrame()
 
     mPlayAudioThreadFlag = false;
     qDebug() << "play audio over ";
+
+    // 为了保证触发，视频和音频线程都发一次
+    //emit AppSignal::getInstance()->sgl_thread_finish_play_video();
 }
 
 void WidgetPlayer::waitMediaPlayStop()
@@ -762,8 +771,11 @@ void WidgetPlayer::waitMediaPlayStop()
         {
             break;
         }
-       // std::this_thread::sleep_for(std::chrono::milliseconds(20));
+        //std::this_thread::sleep_for(std::chrono::milliseconds(20));
     }
+
+    // 彻底停止解析 播放视频 播放音频 后再清理状态
+    clear();
 
     emit sgl_thread_media_play_stop();
 }

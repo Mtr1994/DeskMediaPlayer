@@ -6,8 +6,8 @@
    <rect>
     <x>0</x>
     <y>0</y>
-    <width>580</width>
-    <height>355</height>
+    <width>200</width>
+    <height>125</height>
    </rect>
   </property>
   <property name="windowTitle">
@@ -110,7 +110,7 @@ color: #3f8f54;</string>
        <widget class="QLabel" name="label_3">
         <property name="styleSheet">
          <string notr="true">font: 12pt &quot;华文楷体&quot;;
-color: #fc9153;</string>
+color: #3f8f54;</string>
         </property>
         <property name="text">
          <string>email: 874823787@qq.com</string>

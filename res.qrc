@@ -4,10 +4,10 @@
         <file>Resource/qss/style.qss</file>
         <file>Resource/shader/shader.frag</file>
         <file>Resource/shader/shader.vert</file>
-        <file>Resource/image/pause.svg</file>
-        <file>Resource/image/play.svg</file>
-        <file>Resource/image/play_next.svg</file>
-        <file>Resource/image/play_previous.svg</file>
         <file>Resource/image/volume.svg</file>
+        <file>Resource/image/pause.png</file>
+        <file>Resource/image/play.png</file>
+        <file>Resource/image/play_next.png</file>
+        <file>Resource/image/play_previous.png</file>
     </qresource>
 </RCC>

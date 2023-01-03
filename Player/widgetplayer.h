@@ -27,8 +27,8 @@ public:
     // 暂停播放
     void pause();
 
-    // 停止播放
-    void stop();
+    // 清理播放状态
+    void clear();
 
     // 设置音量
     void setAudioVolume(qreal volume);

@@ -27,7 +27,9 @@ WidgetMediaControl::~WidgetMediaControl()
 
 void WidgetMediaControl::init()
 {
+    connect(ui->btnPreviousFrame, &QPushButton::clicked, this, &WidgetMediaControl::slot_btn_play_previous_frame);
     connect(ui->btnPlay, &QPushButton::clicked, this, &WidgetMediaControl::slot_btn_play_click);
+    connect(ui->btnNextFrame, &QPushButton::clicked, this, &WidgetMediaControl::slot_btn_play_next_frame);
 
     connect(ui->sliderVolume, &QSlider::valueChanged, this, &WidgetMediaControl::slot_volume_value_change);
     // 读取音量配置
@@ -42,6 +44,14 @@ void WidgetMediaControl::init()
 
     connect(AppSignal::getInstance(), &AppSignal::sgl_init_media_duration, this, &WidgetMediaControl::slot_init_media_duration);
     connect(AppSignal::getInstance(), &AppSignal::sgl_thread_current_video_frame_time, this, &WidgetMediaControl::slot_thread_current_video_frame_time, Qt::QueuedConnection);
+    connect(AppSignal::getInstance(), &AppSignal::sgl_thread_finish_play_video, this, &WidgetMediaControl::slot_thread_finish_play_video, Qt::QueuedConnection);
+}
+
+void WidgetMediaControl::slot_btn_play_previous_frame()
+{
+    int targetPosition = ui->slider->value() - 10.0 / mMediaTimeBase;
+    if (targetPosition <= 0) targetPosition = 0;
+    emit AppSignal::getInstance()->sgl_seek_video_position(targetPosition);
 }
 
 void WidgetMediaControl::slot_btn_play_click()
@@ -54,6 +64,13 @@ void WidgetMediaControl::slot_btn_play_click()
     {
         emit AppSignal::getInstance()->sgl_pause_play_video();
     }
+}
+
+void WidgetMediaControl::slot_btn_play_next_frame()
+{
+    int targetPosition = ui->slider->value() + 10.0 / mMediaTimeBase;
+    if (targetPosition >= ui->slider->maximum()) targetPosition = ui->slider->maximum();
+    emit AppSignal::getInstance()->sgl_seek_video_position(targetPosition);
 }
 
 void WidgetMediaControl::slot_volume_value_change(int volume)
@@ -73,7 +90,8 @@ void WidgetMediaControl::slot_init_media_duration(int64_t duration, double timeb
 
     ui->slider->setRange(0, duration);
 
-    qDebug() << "init duration " << duration;
+    qDebug() << "init duration " << duration << " " << timebase;
+    qDebug() << "init time " << duration * timebase;
 
     ui->btnPlay->setChecked(true);
 
@@ -96,4 +114,9 @@ void WidgetMediaControl::slot_thread_current_video_frame_time(int64_t pts, float
 
     uint32_t leftTime = mMediaBaseDuration - time;
     ui->lbDurationLeft->setText(QString("%1:%2:%3").arg(leftTime / 3600, 2, 10, QLatin1Char('0')).arg(leftTime % 3600 / 60, 2, 10, QLatin1Char('0')).arg(leftTime % 60, 2, 10, QLatin1Char('0')));
+}
+
+void WidgetMediaControl::slot_thread_finish_play_video()
+{
+    slot_thread_current_video_frame_time(ui->slider->maximum(), mMediaTimeBase);
 }

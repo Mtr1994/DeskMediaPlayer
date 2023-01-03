@@ -33,6 +33,8 @@ signals:
     // 视频播放位置跳转
     void sgl_seek_video_position(int position);
 
+    // 播放结束信号 (通过视频帧不一定能准确判断结束)
+    void sgl_thread_finish_play_video();
 };
 
 #endif // APPSIGNAL_H

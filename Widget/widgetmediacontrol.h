@@ -18,13 +18,19 @@ public:
     void init();
 
 private slots:
+    void slot_btn_play_previous_frame();
+
     void slot_btn_play_click();
+
+    void slot_btn_play_next_frame();
 
     void slot_volume_value_change(int volume);
 
     void slot_init_media_duration(int64_t duration, double timebase);
 
     void slot_thread_current_video_frame_time(int64_t pts, float timebase);
+
+    void slot_thread_finish_play_video();
 
 private:
     Ui::WidgetMediaControl *ui;

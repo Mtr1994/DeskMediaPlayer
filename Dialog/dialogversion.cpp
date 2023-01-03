@@ -20,8 +20,6 @@ void DialogVersion::init()
     setWindowTitle("版本信息");
     setWindowFlags(Qt::Dialog | Qt::WindowCloseButtonHint | Qt::MSWindowsFixedSizeDialogHint);
 
-    resize(this->nativeParentWidget()->width() * 0.2, this->nativeParentWidget()->width() * 0.2 * 0.618);
-
     QStringList lst = QApplication::applicationVersion().split('.');
     if (lst.count() < 3)
     {

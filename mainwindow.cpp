@@ -55,7 +55,7 @@ void MainWindow::init()
     connect(AppSignal::getInstance(), &AppSignal::sgl_seek_video_position, this, &MainWindow::slot_seek_video_position);
 
     // 默认测试播放
-    ui->widgetOpenGLPlayer->play(SoftConfig::getInstance()->getValue("Media", "path"));
+    //ui->widgetOpenGLPlayer->play(SoftConfig::getInstance()->getValue("Media", "path"));
 }
 
 void MainWindow::slot_start_play_video()
@@ -86,7 +86,7 @@ void MainWindow::slot_show_about_developer()
 
 void MainWindow::slot_open_video_file()
 {
-    QString fileName = QFileDialog::getOpenFileName(nullptr, tr("选择视频文件"), QStandardPaths::writableLocation(QStandardPaths::DesktopLocation), tr("视频文件 (*.mp4 *.mkv *.avi *.mov *.flv *.wmv *.mpg)"));
+    QString fileName = QFileDialog::getOpenFileName(nullptr, tr("选择视频文件"), QStandardPaths::writableLocation(QStandardPaths::DesktopLocation), tr("视频文件 (*.mp4 *.mkv *.avi *.mov *.flv *.wmv *.mpg *.m4v *.ts)"));
     if (fileName.isEmpty()) return;
 
     ui->widgetOpenGLPlayer->play(fileName);
