@@ -23,6 +23,11 @@ WidgetPlayer::WidgetPlayer(QWidget *parent) : QOpenGLWidget(parent)
 
     // 线程更新视频界面
     connect(this, &WidgetPlayer::sgl_thread_update_video_frame, this, [this] { update();}, Qt::QueuedConnection);
+
+    // 启用这个回导致无法截图（全黑），不启动就会感觉像素化严重
+//    QSurfaceFormat surfaceFormat;
+//    surfaceFormat.setSamples(24);
+//    setFormat(surfaceFormat);
 }
 
 WidgetPlayer::~WidgetPlayer()
@@ -40,26 +45,25 @@ void WidgetPlayer::play(const QString &path)
     if (mMediaPlayFlag)
     {
         mMediaPlayFlag = false;
+        mCvParse.notify_one();
+
         auto funcWait = std::bind(&WidgetPlayer::waitMediaPlayStop, this);
         std::thread threadWait(funcWait);
         threadWait.detach();
-        return;
     }
+    else
+    {
+        if (mMediaPath.isEmpty()) return;
 
-    if (mMediaPath.isEmpty()) return;
+        mMediaPlayFlag = true;
 
-    clear();
+        auto funcParse = std::bind(&WidgetPlayer::parse, this, std::placeholders::_1);
+        std::thread threadParse(funcParse, path);
+        threadParse.detach();
 
-    mMediaPlayFlag = true;
-
-    qDebug() << "start " << path;
-
-    auto funcParse = std::bind(&WidgetPlayer::parse, this, std::placeholders::_1);
-    std::thread threadParse(funcParse, path);
-    threadParse.detach();
-
-    // 开始播放
-    start();
+        // 开始播放
+        start();
+    }
 }
 
 void WidgetPlayer::start()
@@ -76,7 +80,6 @@ void WidgetPlayer::pause()
 void WidgetPlayer::clear()
 {
     qDebug() << "WidgetPlayer::clear";
-
     mMediaPlayFlag = false;
     mMediaPauseFlag = false;
     mArriveTargetFrame = true;
@@ -87,6 +90,7 @@ void WidgetPlayer::clear()
     mBeginVideoTimeStamp = -1;
     mBeginAudioTimeStamp = -1;
 
+    mTextureID = -1;
     mTextureWidth = 0;
     mTextureHeight = 0;
 
@@ -94,6 +98,14 @@ void WidgetPlayer::clear()
     mSampleRate = 0;
     mAudioChannles = 0;
     mAudioSampleFormat = 0;
+
+    if (nullptr != mAudioOutput)
+    {
+        mAudioOutput->stop();
+        delete mAudioOutput;
+        mAudioOutput = nullptr;
+    }
+    mIODevice = nullptr;
 
     while (!mQueueVideoFrame.empty())
     {
@@ -137,6 +149,9 @@ void WidgetPlayer::initializeGL()
 {
     // 不调用这句话，就不能使用 gl 开头的函数，程序会崩溃
     initializeOpenGLFunctions();
+
+    // 开启多重采样
+    //glEnable(GL_MULTISAMPLE);
 
     // 着色器文件不能使用 UTF-8-BOM 编码，会报错，只能采用 UTF-8 编码
 
@@ -249,6 +264,8 @@ void WidgetPlayer::paintGL()
 
     // 写入数据的时候，一定要先绑定纹理单元
     glBindTexture(GL_TEXTURE_2D, mTextureID);
+    // 可以让纹理读取数据的时候按照设定的大小读取，这个值概念上跟linesize是一样的，这样就不会把无效的数据读取进去了
+    glPixelStorei(GL_UNPACK_ROW_LENGTH, mCurrentVideoFrame.linesize);
     glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, mCurrentVideoFrame.width, mCurrentVideoFrame.height, 0, GL_RGB, GL_UNSIGNED_BYTE, mCurrentVideoFrame.buffer);
     // 数据已经发给显卡，可以删除 CPU 中的数据
     if (mCurrentVideoFrame.buffer)
@@ -258,7 +275,6 @@ void WidgetPlayer::paintGL()
     }
     lock.unlock();
     glGenerateMipmap(GL_TEXTURE_2D);
-
 
     glDrawElements(GL_QUADS, 4, GL_UNSIGNED_INT, 0);
 
@@ -399,7 +415,7 @@ void WidgetPlayer::parse(const QString &path)
         }
     }
 
-    auto sampleSize = av_get_bytes_per_sample(AV_SAMPLE_FMT_FLT);
+    auto sampleSize = av_get_bytes_per_sample(AV_SAMPLE_FMT_U8);
     // 分配一个packet
     AVPacket *packet = av_packet_alloc();
     AVFrame *frame = av_frame_alloc();
@@ -490,30 +506,27 @@ void WidgetPlayer::parse(const QString &path)
 
                     int pixWidth = frame->width;
                     int pixHeight = frame->height;
+                    int linesize0 = frame->linesize[0];
 
-                    uint8_t *buffer = new uint8_t[frame->linesize[0] * pixHeight * 3];
-                    memset(buffer, 0, frame->linesize[0] * pixHeight * 3);
+                    uint8_t *buffer = new uint8_t[linesize0 * pixHeight * 3];
+                    memset(buffer, 0, linesize0 * pixHeight * 3);
 
                     VideoFrame videoFrame = { frame->pts - mBeginVideoTimeStamp, pixWidth, pixHeight, sampleSize, 0, buffer, 0 };
                     if (frame->format == AV_PIX_FMT_RGB24)
                     {
-                        memcpy(buffer, frame->data[0], frame->linesize[0] * pixHeight * 3);
+                        memcpy(buffer, frame->data[0], linesize0 * pixHeight * 3);
                         videoFrame.timebase = (double)codeCtxVideo->pkt_timebase.num / codeCtxVideo->pkt_timebase.den;
                     }
                     else
                     {
                         uint8_t *data[AV_NUM_DATA_POINTERS] = { buffer };
-                        int linesize[AV_NUM_DATA_POINTERS] = { pixWidth * 3, 0, 0, 0, 0, 0, 0, 0 };
+                        int linesize[AV_NUM_DATA_POINTERS] = { linesize0 * 3, 0, 0, 0, 0, 0, 0, 0 };
                         int ret = sws_scale(pSwsCtx, (uint8_t const * const *) frame->data, frame->linesize, 0, frame->height, data, linesize);
-                        if (ret <= 0)
-                        {
-                            memset(buffer, 0, frame->linesize[0] * pixHeight * 3);
-                        }
-
+                        if (ret <= 0)  memset(buffer, 0, linesize0 * pixHeight * 3);
                         videoFrame.timebase = (double)codeCtxVideo->pkt_timebase.num / codeCtxVideo->pkt_timebase.den;
                     }
 
-                    videoFrame.linesize = frame->linesize[0];
+                    videoFrame.linesize = linesize0;
 
                     // 根据实际数量，动态修改等待时间
                     size_t size = mQueueVideoFrame.size();
