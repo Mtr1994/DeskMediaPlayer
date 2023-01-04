@@ -34,6 +34,10 @@ private slots:
 
     void slot_open_video_file();
 
+    void slot_media_show_full_screen();
+
+    void slot_thread_save_capture_status(bool status, const QString &path);
+
 private:
     Ui::MainWindow *ui;
 };

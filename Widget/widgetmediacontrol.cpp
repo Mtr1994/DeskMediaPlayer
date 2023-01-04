@@ -31,6 +31,9 @@ void WidgetMediaControl::init()
     connect(ui->btnPlay, &QPushButton::clicked, this, &WidgetMediaControl::slot_btn_play_click);
     connect(ui->btnNextFrame, &QPushButton::clicked, this, &WidgetMediaControl::slot_btn_play_next_frame);
 
+    // 全屏显示
+    connect(ui->btnFullScreen, &QPushButton::clicked, AppSignal::getInstance(), &AppSignal::sgl_media_show_full_screen);
+
     connect(ui->sliderVolume, &QSlider::valueChanged, this, &WidgetMediaControl::slot_volume_value_change);
     // 读取音量配置
     ui->sliderVolume->setValue(SoftConfig::getInstance()->getValue("Volume", "value").toUInt());
@@ -47,10 +50,17 @@ void WidgetMediaControl::init()
     connect(AppSignal::getInstance(), &AppSignal::sgl_thread_finish_play_video, this, &WidgetMediaControl::slot_thread_finish_play_video, Qt::QueuedConnection);
 }
 
+void WidgetMediaControl::changePlayStatus()
+{
+    ui->btnPlay->setChecked(!ui->btnPlay->isChecked());
+    slot_btn_play_click();
+}
+
 void WidgetMediaControl::slot_btn_play_previous_frame()
 {
-    int targetPosition = ui->slider->value() - 10.0 / mMediaTimeBase;
+    int targetPosition = ui->slider->value() - 5.0 / mMediaTimeBase;
     if (targetPosition <= 0) targetPosition = 0;
+
     emit AppSignal::getInstance()->sgl_seek_video_position(targetPosition);
 }
 
@@ -68,7 +78,7 @@ void WidgetMediaControl::slot_btn_play_click()
 
 void WidgetMediaControl::slot_btn_play_next_frame()
 {
-    int targetPosition = ui->slider->value() + 10.0 / mMediaTimeBase;
+    int targetPosition = ui->slider->value() + 5.0 / mMediaTimeBase;
     if (targetPosition >= ui->slider->maximum()) targetPosition = ui->slider->maximum();
     emit AppSignal::getInstance()->sgl_seek_video_position(targetPosition);
 }

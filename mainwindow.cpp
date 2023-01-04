@@ -3,6 +3,7 @@
 #include "Public/appsignal.h"
 #include "Configure/softconfig.h"
 #include "Dialog/dialogversion.h"
+#include "Control/Message/messagewidget.h"
 
 #include <QScreen>
 #include <Windows.h>
@@ -47,12 +48,19 @@ void MainWindow::init()
 
     connect(ui->actionSetting, &QAction::triggered, this, []{ /* 还没写，哈哈 */});
 
+    connect(ui->actionGrapImage, &QAction::triggered, this, [this]
+    {
+        ui->widgetOpenGLPlayer->grapImage();
+    });
+
     connect(ui->actionAbout, &QAction::triggered, this, &MainWindow::slot_show_about_developer);
 
     connect(AppSignal::getInstance(), &AppSignal::sgl_start_play_video, this, &MainWindow::slot_start_play_video);
     connect(AppSignal::getInstance(), &AppSignal::sgl_pause_play_video, this, &MainWindow::slot_pause_play_video);
     connect(AppSignal::getInstance(), &AppSignal::sgl_change_audio_volume, this, &MainWindow::slot_change_audio_volume);
     connect(AppSignal::getInstance(), &AppSignal::sgl_seek_video_position, this, &MainWindow::slot_seek_video_position);
+    connect(AppSignal::getInstance(), &AppSignal::sgl_media_show_full_screen, this, &MainWindow::slot_media_show_full_screen);
+    connect(AppSignal::getInstance(), &AppSignal::sgl_thread_save_capture_status, this, &MainWindow::slot_thread_save_capture_status, Qt::QueuedConnection);
 
     // 默认测试播放
     //ui->widgetOpenGLPlayer->play(SoftConfig::getInstance()->getValue("Media", "path"));
@@ -92,6 +100,21 @@ void MainWindow::slot_open_video_file()
     ui->widgetOpenGLPlayer->play(fileName);
 }
 
+void MainWindow::slot_media_show_full_screen()
+{
+    showFullScreen();
+    ui->widgetMediaControl->setVisible(false);
+    ui->menubar->setVisible(false);
+}
+
+void MainWindow::slot_thread_save_capture_status(bool status, const QString &path)
+{
+    Q_UNUSED(path);
+    int type = status ? MessageWidget::M_Success : MessageWidget::M_Error;
+    MessageWidget *widget = new MessageWidget(type, MessageWidget::P_Top_Center, this);
+    widget->showMessage(status ? "截图已保存到桌面" : "无法保存空的图片");
+}
+
 void MainWindow::keyPressEvent(QKeyEvent *event)
 {
     if(event->modifiers() == Qt::Modifier::CTRL)
@@ -100,5 +123,19 @@ void MainWindow::keyPressEvent(QKeyEvent *event)
         {
             emit ui->actionOpen->triggered(true);
         }
+        else if (event->key() == Qt::Key_P)
+        {
+            emit ui->actionGrapImage->triggered(true);
+        }
+    }
+    else if (event->key() == Qt::Key_Escape)
+    {
+        showNormal();
+        ui->widgetMediaControl->setVisible(true);
+        ui->menubar->setVisible(true);
+    }
+    else if (event->key() == Qt::Key_Space)
+    {
+        ui->widgetMediaControl->changePlayStatus();
     }
 }

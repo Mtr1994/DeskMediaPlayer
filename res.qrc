@@ -9,5 +9,9 @@
         <file>Resource/image/play.png</file>
         <file>Resource/image/play_next.png</file>
         <file>Resource/image/play_previous.png</file>
+        <file>Resource/image/full_screen.svg</file>
+        <file>Resource/image/error.svg</file>
+        <file>Resource/image/info.svg</file>
+        <file>Resource/image/success.svg</file>
     </qresource>
 </RCC>

@@ -1,6 +1,7 @@
 #include <stdint.h>
 
-typedef struct {
+typedef struct
+{
     int64_t pts;
     int width;
     int height;
@@ -10,7 +11,8 @@ typedef struct {
     int linesize;
 } VideoFrame;
 
-typedef struct {
+typedef struct
+{
     int64_t pts;
     int size;
     double timebase;

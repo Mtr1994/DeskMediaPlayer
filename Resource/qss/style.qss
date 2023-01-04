@@ -184,6 +184,29 @@ QPushButton#btnNextFrame:pressed
     padding: 0.24em;
 }
 
+QPushButton#btnFullScreen
+{
+    font-size: 9pt;
+    background-color: transparent;
+    image: url(:/Resource/image/full_screen.svg);
+    max-height: 1.6em;
+    max-width: 1.6em;
+    min-height: 1.6em;
+    min-width: 1.6em;
+    padding: 0.2em;
+    border-radius: 1.0em;
+}
+
+QPushButton#btnFullScreen:hover
+{
+    padding: 0.1em;
+}
+
+QPushButton#btnFullScreen:pressed
+{
+    padding: 0.2em;
+}
+
 /* QSlider */
 QSlider
 {

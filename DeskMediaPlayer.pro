@@ -11,10 +11,10 @@ unix: QMAKE_LFLAGS += -no-pie
 
 # Qt 5.14 VERSION can only contains numbers, no any others type of character please
 # please do not put 0 before any version number, because this will cause a warnning on Qt 5.14
-win32:  VERSION = 23.01.03.1806                # major.minor.patch.build
+win32:  VERSION = 23.01.04.1806                # major.minor.patch.build
 else:   VERSION = 21.5.9                    # major.minor.patch
 
-QMAKE_TARGET_COPYRIGHT = mtr company Co., Ltd
+QMAKE_TARGET_COPYRIGHT = Mtr1994 User Co., Ltd
 
 # The following define makes your compiler emit warnings if you use
 # any Qt feature that has been marked deprecated (the exact warnings
@@ -37,6 +37,7 @@ DESTDIR = ../output
 
 SOURCES += \
     Configure/softconfig.cpp \
+    Control/Message/messagewidget.cpp \
     Dialog/dialogversion.cpp \
     Player/widgetplayer.cpp \
     Public/appsignal.cpp \
@@ -47,9 +48,11 @@ SOURCES += \
 HEADERS += \
     Common/common.h \
     Configure/softconfig.h \
+    Control/Message/messagewidget.h \
     Dialog/dialogversion.h \
     Player/widgetplayer.h \
     Public/appsignal.h \
+    Public/ffmpeg.h \
     Public/threadsafequeue.h \
     Widget/widgetmediacontrol.h \
     mainwindow.h

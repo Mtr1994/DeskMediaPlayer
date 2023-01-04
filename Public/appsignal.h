@@ -35,6 +35,12 @@ signals:
 
     // 播放结束信号 (通过视频帧不一定能准确判断结束)
     void sgl_thread_finish_play_video();
+
+    // 全屏播放
+    void sgl_media_show_full_screen();
+
+    // 截图保存完成
+    void sgl_thread_save_capture_status(bool status, const QString &path);
 };
 
 #endif // APPSIGNAL_H

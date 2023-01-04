@@ -1,23 +1,14 @@
 ﻿#include "widgetplayer.h"
 #include "Public/appsignal.h"
 #include "Configure/softconfig.h"
-
-extern "C"
-{
-    #include <libavcodec/avcodec.h>
-    #include <libavformat/avformat.h>
-    #include <libavfilter/buffersink.h>
-    #include <libavfilter/buffersrc.h>
-    #include <libavutil/opt.h>
-    #include "libswscale/swscale.h"
-    #include "libswresample/swresample.h"
-    #include "libavutil/opt.h"
-}
+#include "Public/ffmpeg.h"
 
 #include <thread>
 #include <QAudioFormat>
 #include <QAudioOutput>
 #include <algorithm>
+#include <QStandardPaths>
+#include <QDateTime>
 
 // test
 #include <QDebug>
@@ -25,7 +16,7 @@ extern "C"
 
 WidgetPlayer::WidgetPlayer(QWidget *parent) : QOpenGLWidget(parent)
 {
-    mCurrentVideoFrame.pts = -1;
+    mCurrentVideoFrame.linesize = 0;
     mCurrentAudioFrame.pts = -1;
 
     connect(this, &WidgetPlayer::sgl_thread_media_play_stop, this, &WidgetPlayer::slot_thread_media_play_stop, Qt::QueuedConnection);
@@ -37,8 +28,7 @@ WidgetPlayer::WidgetPlayer(QWidget *parent) : QOpenGLWidget(parent)
 WidgetPlayer::~WidgetPlayer()
 {
     mMediaPath.clear();
-    // 立即停止播放
-    clear();
+    mMediaPlayFlag = false;
 
     if (nullptr != mAudioOutput) delete mAudioOutput;
 }
@@ -85,6 +75,8 @@ void WidgetPlayer::pause()
 
 void WidgetPlayer::clear()
 {
+    qDebug() << "WidgetPlayer::clear";
+
     mMediaPlayFlag = false;
     mMediaPauseFlag = false;
     mArriveTargetFrame = true;
@@ -133,6 +125,12 @@ void WidgetPlayer::seek(int position)
     //qDebug() << "seek 1" << position;
     mSeekDuration = position + mBeginVideoTimeStamp;
     //qDebug() << "seek 2" << mSeekDuration;
+}
+
+void WidgetPlayer::grapImage()
+{
+    mUserGrapImage = true;
+    update();
 }
 
 void WidgetPlayer::initializeGL()
@@ -234,16 +232,18 @@ void WidgetPlayer::initializeGL()
 void WidgetPlayer::paintGL()
 {
     glViewport((width() - mTextureWidth) / 2.0, (height() - mTextureHeight) / 2.0, mTextureWidth, mTextureHeight);
-    if (mCurrentVideoFrame.pts < 0)
+    if (mCurrentVideoFrame.linesize <= 0)
     {
         glBindTexture(GL_TEXTURE_2D, mTextureID);
         glDrawElements(GL_QUADS, 4, GL_UNSIGNED_INT, 0);
+
+        // 暂停状态下尝试截图
+        saveGrabImage();
         return;
     }
 
     glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
-    glDisable(GL_DEPTH_TEST);
 
     std::unique_lock<std::mutex> lock(mMutexPlayFrame);
 
@@ -254,12 +254,16 @@ void WidgetPlayer::paintGL()
     if (mCurrentVideoFrame.buffer)
     {
         delete [] mCurrentVideoFrame.buffer;
-        mCurrentVideoFrame.pts = -1;
+        mCurrentVideoFrame.linesize = 0;
     }
     lock.unlock();
     glGenerateMipmap(GL_TEXTURE_2D);
 
+
     glDrawElements(GL_QUADS, 4, GL_UNSIGNED_INT, 0);
+
+    // 播放状态下尝试截图
+    saveGrabImage();
 }
 
 void WidgetPlayer::resizeGL(int w, int h)
@@ -406,12 +410,11 @@ void WidgetPlayer::parse(const QString &path)
     bool seekAudioFlag = false;
 
     std::mutex mutexParse;
-    std::condition_variable cvParse;
 
     while (mMediaPlayFlag)
     {
         std::unique_lock<std::mutex> lock(mutexParse);
-        if(cvParse.wait_for(lock, std::chrono::milliseconds(milliseconds)) == std::cv_status::timeout)
+        if((mQueueVideoFrame.size() < 10) || (mCvParse.wait_for(lock, std::chrono::milliseconds(milliseconds)) == std::cv_status::timeout))
         {
             if (mSeekDuration >= 0)
             {
@@ -420,7 +423,7 @@ void WidgetPlayer::parse(const QString &path)
                 if (nullptr != codeCtxAudio) avcodec_flush_buffers(codeCtxAudio);
                 avformat_flush(formatCtx);
 
-                int ret = av_seek_frame(formatCtx, videoStreamIndex, mSeekDuration, AVSEEK_FLAG_FRAME);
+                int ret = av_seek_frame(formatCtx, videoStreamIndex, mSeekDuration, mSeekDuration <= mCurrentVideoFrame.pts ? AVSEEK_FLAG_BACKWARD : AVSEEK_FLAG_FRAME);
                 if (ret >= 0)
                 {
                     mSeekDuration = -1;
@@ -514,9 +517,7 @@ void WidgetPlayer::parse(const QString &path)
 
                     // 根据实际数量，动态修改等待时间
                     size_t size = mQueueVideoFrame.size();
-
-                    // 60 参数，保证队列中大概保持在 10 条数据左右
-                    milliseconds = (int)size * 20 * frame->pkt_duration * (double)codeCtxVideo->pkt_timebase.num / codeCtxVideo->pkt_timebase.den;
+                    milliseconds = (int)size * 1000;
 
                     mQueueVideoFrame.push(videoFrame);
 
@@ -683,6 +684,8 @@ void WidgetPlayer::playVideoFrame()
         {
             emit AppSignal::getInstance()->sgl_thread_current_video_frame_time(frame.pts, frame.timebase);
         }
+
+        mCvParse.notify_one();
     }
 
     mPlayVideoThreadFlag = false;
@@ -690,7 +693,7 @@ void WidgetPlayer::playVideoFrame()
     qDebug() << "play video over ";
 
     // 为了保证触发，视频和音频线程都发一次
-    //emit AppSignal::getInstance()->sgl_thread_finish_play_video();
+    emit AppSignal::getInstance()->sgl_thread_finish_play_video();
 }
 
 void WidgetPlayer::playAudioFrame()
@@ -760,7 +763,7 @@ void WidgetPlayer::playAudioFrame()
     qDebug() << "play audio over ";
 
     // 为了保证触发，视频和音频线程都发一次
-    //emit AppSignal::getInstance()->sgl_thread_finish_play_video();
+    emit AppSignal::getInstance()->sgl_thread_finish_play_video();
 }
 
 void WidgetPlayer::waitMediaPlayStop()
@@ -810,6 +813,49 @@ void WidgetPlayer::resizeVideo()
 
     mTextureWidth = widthSize;
     mTextureHeight = heightSize;
+}
+
+// 函数只能在 paintGL 中调用
+void WidgetPlayer::saveGrabImage()
+{
+    // 渲染完再截图
+    if (!mUserGrapImage) return;
+
+    mUserGrapImage = false;
+
+    uint32_t textureWidth = mTextureWidth;
+    uint32_t textureHeight = mTextureHeight;
+    // opengl 默认读取方式是 4 字节对齐方式，如果宽度不够 4 字节，函数还是会读四字节, 就会导致直接乘积得到的内存不够，删除的时候就会越界崩溃
+    uint32_t len = (textureWidth + (4 - textureWidth % 4)) * textureHeight * 3;
+    uint8_t *buffer = new uint8_t[len];
+    if (nullptr == buffer) return;
+    memset(buffer, 0, len);
+
+    // 设定读取的内存对其方式 （只能为 1 2 4 8）
+    glPixelStorei(GL_PACK_ALIGNMENT, 4);
+
+    int x = (width() - textureWidth) / 2.0;
+    int y = (height() - textureHeight) / 2.0;
+    // 从 FBO 读 可能会快 2 倍
+    glReadPixels(x, y, textureWidth, textureHeight, GL_RGB, GL_UNSIGNED_BYTE, buffer);
+    auto func = [buffer, textureWidth, textureHeight]
+    {
+        QImage image(buffer, textureWidth, textureHeight, QImage::Format_RGB888);
+        image = image.mirrored(false, true);
+
+        // 按照视频的长宽比设置固定大小的缩放
+//        QPixmap pixmap = QPixmap::fromImage(image);
+//        pixmap = pixmap.scaled(QSize(1920, 1080), Qt::KeepAspectRatio);
+
+        QString desktop = QStandardPaths::writableLocation(QStandardPaths::DesktopLocation);
+        QString path = QString("%1/Capture_%2.png").arg(desktop, QDateTime::currentDateTime().toString("yyyyMMddhhmmsszzz"));
+        //bool status = pixmap.save(path, "png");
+        bool status = image.save(path, "png");
+        emit AppSignal::getInstance()->sgl_thread_save_capture_status(status, path);
+        delete [] buffer;
+    };
+    std::thread th(func);
+    th.detach();
 }
 
 void WidgetPlayer::slot_thread_media_play_stop()

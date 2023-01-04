@@ -36,6 +36,9 @@ public:
     // 视频跳转
     void seek(int position);
 
+    // 截图
+    void grapImage();
+
 signals:
     void sgl_thread_update_video_frame();
     void sgl_thread_media_play_stop();
@@ -62,6 +65,8 @@ private:
 
     void resizeVideo();
 
+    void saveGrabImage();
+
 private slots:
     void slot_thread_media_play_stop();
 
@@ -85,6 +90,9 @@ private:
 
     // 播放状态变量
     std::condition_variable mCvPlayMedia;
+
+    // 解析状态变量
+    std::condition_variable mCvParse;
 
     // 当前视频帧数据
     VideoFrame mCurrentVideoFrame;
@@ -136,6 +144,9 @@ private:
     volatile bool mPraseThreadFlag = false;
     volatile bool mPlayVideoThreadFlag = false;
     volatile bool mPlayAudioThreadFlag = false;
+
+    // 是否需要截图
+    bool mUserGrapImage = false;
 };
 
 #endif // WIDGETPLAYER_H

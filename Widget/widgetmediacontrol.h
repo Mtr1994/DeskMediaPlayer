@@ -17,6 +17,8 @@ public:
 
     void init();
 
+    void changePlayStatus();
+
 private slots:
     void slot_btn_play_previous_frame();
 
