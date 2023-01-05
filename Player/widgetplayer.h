@@ -100,7 +100,7 @@ private:
     // 当前音频帧
     AudioFrame mCurrentAudioFrame;
 
-    int mSampleSize = 0;
+    int mAudioSampleSize = 0;
     int mSampleRate = 0;
     int mAudioChannles = 0;
     int mAudioSampleFormat = 0;
@@ -130,6 +130,18 @@ private:
 
     // 播放锁
     std::mutex mMutexPlayFrame;
+
+    // 视频帧等待锁
+    std::mutex mMutexWaitVideoFrame;
+
+    // 音频帧等待锁
+    std::mutex mMutexWaitAudioFrame;
+
+    // 视频关闭锁
+    std::mutex mMutexCloseMedia;
+
+    // 视频关闭 等待变量
+    std::condition_variable mCvCloseMedia;
 
     // 播放器状态
     bool mMediaPlayFlag = false;

@@ -55,9 +55,6 @@ void WidgetPlayer::play(const QString &path)
         auto funcParse = std::bind(&WidgetPlayer::parse, this, std::placeholders::_1);
         std::thread threadParse(funcParse, path);
         threadParse.detach();
-
-        // 开始播放
-        start();
     }
 }
 
@@ -65,6 +62,8 @@ void WidgetPlayer::start()
 {
     mMediaPauseFlag = false;
     mStartTimeStamp = 0;
+
+    mCvPlayMedia.notify_all();
 }
 
 void WidgetPlayer::pause()
@@ -89,7 +88,7 @@ void WidgetPlayer::clear()
     mTextureWidth = 0;
     mTextureHeight = 0;
 
-    mSampleSize = 0;
+    mAudioSampleSize = 0;
     mSampleRate = 0;
     mAudioChannles = 0;
     mAudioSampleFormat = 0;
@@ -409,7 +408,7 @@ void WidgetPlayer::parse(const QString &path)
                 return;
             }
 
-            mSampleSize = av_get_bytes_per_sample(AV_SAMPLE_FMT_FLT);
+            mAudioSampleSize = av_get_bytes_per_sample(AV_SAMPLE_FMT_FLT);
             mSampleRate = codeCtxAudio->sample_rate;
             mAudioChannles = codeCtxAudio->channels;
             mAudioSampleFormat = codeCtxAudio->sample_fmt;
@@ -660,6 +659,9 @@ void WidgetPlayer::parse(const QString &path)
 
     mPraseThreadFlag = false;
 
+    // 通知可能存在的关闭等待线程
+    mCvCloseMedia.notify_one();
+
     qDebug() << "parse media over ";
 }
 
@@ -667,24 +669,37 @@ void WidgetPlayer::playVideoFrame()
 {
     qDebug() << "play video begin ";
     mPlayVideoThreadFlag = true;
+
+    std::unique_lock<std::mutex> lockNextFrame(mMutexWaitVideoFrame);
     while (mMediaPlayFlag)
     {
         // 解析结束且视频帧为空的时候，关闭播放线程
         if (!mPraseThreadFlag && mQueueVideoFrame.empty()) break;
 
         VideoFrame frame;
-        if (mQueueVideoFrame.empty() || mMediaPauseFlag) continue;
+        if (mQueueVideoFrame.empty() || mMediaPauseFlag)
+        {
+            mCvPlayMedia.wait(lockNextFrame, [this]{ return !mQueueVideoFrame.empty() && !mMediaPauseFlag; });
+            continue;
+        }
+
         mQueueVideoFrame.wait_and_pop(frame);
 
         uint64_t currentTimeStamp = getCurrentMillisecond();
         uint64_t time = frame.pts * frame.timebase * 1000;
 
         if (mStartTimeStamp == 0) mStartTimeStamp = currentTimeStamp - time;
-        if ((mSeekVideoFrameDuration < 0) && ((currentTimeStamp - mStartTimeStamp) < time)) continue;
+        if ((mSeekVideoFrameDuration < 0) && ((currentTimeStamp - mStartTimeStamp) < time))
+        {
+            uint32_t milliseconds = time - (currentTimeStamp - mStartTimeStamp);
+            mCvPlayMedia.wait_for(lockNextFrame, std::chrono::milliseconds(milliseconds));
+            continue;
+        }
 
         mQueueVideoFrame.wait_and_pop();
 
         std::unique_lock<std::mutex> lock(mMutexPlayFrame);
+        if (mCurrentVideoFrame.linesize > 0) delete [] mCurrentVideoFrame.buffer;
         mCurrentVideoFrame = frame;
         resizeVideo();
         lock.unlock();
@@ -711,6 +726,9 @@ void WidgetPlayer::playVideoFrame()
 
     qDebug() << "play video over ";
 
+    // 通知可能存在的关闭等待线程
+    mCvCloseMedia.notify_one();
+
     // 为了保证触发，视频和音频线程都发一次
     emit AppSignal::getInstance()->sgl_thread_finish_play_video();
 }
@@ -718,11 +736,12 @@ void WidgetPlayer::playVideoFrame()
 void WidgetPlayer::playAudioFrame()
 {
     qDebug() << "play audio begin ";
+
     mPlayAudioThreadFlag = true;
     QAudioFormat audioFormat;
     audioFormat.setSampleRate(mSampleRate);
     audioFormat.setChannelCount(mAudioChannles);
-    audioFormat.setSampleSize(8 * mSampleSize);
+    audioFormat.setSampleSize(8 * mAudioSampleSize);
     audioFormat.setSampleType(QAudioFormat::Float);
 
     audioFormat.setCodec("audio/pcm");
@@ -734,8 +753,10 @@ void WidgetPlayer::playAudioFrame()
         mAudioOutput->setVolume(mAudioVolume);
     }
 
-    mAudioOutput->setBufferSize(mSampleRate * mAudioChannles * mSampleSize);
+    mAudioOutput->setBufferSize(mSampleRate * mAudioChannles * mAudioSampleSize);
     mIODevice = mAudioOutput->start();
+
+    std::unique_lock<std::mutex> lockNextFrame(mMutexWaitAudioFrame);
 
     // 提取音频帧
     while (mMediaPlayFlag)
@@ -744,7 +765,11 @@ void WidgetPlayer::playAudioFrame()
         if (!mPraseThreadFlag && mQueueVideoFrame.empty()) break;
 
         AudioFrame frame;
-        if (mQueueAudioFrame.empty() || mMediaPauseFlag) continue;
+        if (mQueueAudioFrame.empty() || mMediaPauseFlag)
+        {
+            mCvPlayMedia.wait(lockNextFrame, [this]{ return !mQueueAudioFrame.empty() && !mMediaPauseFlag; });
+            continue;
+        }
         mQueueAudioFrame.wait_and_pop(frame);
 
         uint64_t currentTimeStamp = getCurrentMillisecond();
@@ -752,7 +777,12 @@ void WidgetPlayer::playAudioFrame()
         if (mStartTimeStamp == 0) mStartTimeStamp = currentTimeStamp - time;
 
         // 判断是否可以播放该帧了(也判断是否需要跳过)
-        if ((mSeekAudioFrameDuration < 0) && ((currentTimeStamp - mStartTimeStamp) < time)) continue;
+        if ((mSeekAudioFrameDuration < 0) && ((currentTimeStamp - mStartTimeStamp) < time))
+        {
+            uint32_t milliseconds = time - (currentTimeStamp - mStartTimeStamp);
+            mCvPlayMedia.wait_for(lockNextFrame, std::chrono::milliseconds(milliseconds));
+            continue;
+        }
 
         // qDebug() << "play video frame " << frame.pts;
 
@@ -781,19 +811,20 @@ void WidgetPlayer::playAudioFrame()
     mPlayAudioThreadFlag = false;
     qDebug() << "play audio over ";
 
+    // 通知可能存在的关闭等待线程
+    mCvCloseMedia.notify_one();
+
     // 为了保证触发，视频和音频线程都发一次
     emit AppSignal::getInstance()->sgl_thread_finish_play_video();
 }
 
 void WidgetPlayer::waitMediaPlayStop()
 {
+    std::unique_lock<std::mutex> lock(mMutexCloseMedia);
     while (true)
     {
-        if ((!mPraseThreadFlag) && (!mPlayVideoThreadFlag) && (!mPlayAudioThreadFlag))
-        {
-            break;
-        }
-        //std::this_thread::sleep_for(std::chrono::milliseconds(20));
+        mCvCloseMedia.wait(lock, [this]{ qDebug() << "try close media " << mPraseThreadFlag << " " << mPlayVideoThreadFlag << " " << mPlayAudioThreadFlag; return !mPraseThreadFlag && !mPlayVideoThreadFlag && !mPlayAudioThreadFlag; });
+        break;
     }
 
     // 彻底停止解析 播放视频 播放音频 后再清理状态
