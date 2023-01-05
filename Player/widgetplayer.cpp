@@ -23,11 +23,6 @@ WidgetPlayer::WidgetPlayer(QWidget *parent) : QOpenGLWidget(parent)
 
     // 线程更新视频界面
     connect(this, &WidgetPlayer::sgl_thread_update_video_frame, this, [this] { update();}, Qt::QueuedConnection);
-
-    // 启用这个回导致无法截图（全黑），不启动就会感觉像素化严重
-//    QSurfaceFormat surfaceFormat;
-//    surfaceFormat.setSamples(24);
-//    setFormat(surfaceFormat);
 }
 
 WidgetPlayer::~WidgetPlayer()
@@ -231,6 +226,7 @@ void WidgetPlayer::initializeGL()
 
         // set texture filtering parameters
         // 使用 GL_LINEAR_MIPMAP_LINEAR 的时候，必须调用  glGenerateMipmap 函数
+        // 这个多级渐远纹理可以让视频在缩小的时候，不会出现像素化的情况
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
 
@@ -247,39 +243,49 @@ void WidgetPlayer::initializeGL()
 void WidgetPlayer::paintGL()
 {
     glViewport((width() - mTextureWidth) / 2.0, (height() - mTextureHeight) / 2.0, mTextureWidth, mTextureHeight);
-    if (mCurrentVideoFrame.linesize <= 0)
+
+    if (!mPlayVideoThreadFlag)
+    {
+        glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
+        glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+        return;
+    }
+    else if (mCurrentVideoFrame.linesize <= 0)
     {
         glBindTexture(GL_TEXTURE_2D, mTextureID);
+        glGenerateMipmap(GL_TEXTURE_2D);
         glDrawElements(GL_QUADS, 4, GL_UNSIGNED_INT, 0);
 
         // 暂停状态下尝试截图
         saveGrabImage();
         return;
     }
-
-    glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
-    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
-
-    std::unique_lock<std::mutex> lock(mMutexPlayFrame);
-
-    // 写入数据的时候，一定要先绑定纹理单元
-    glBindTexture(GL_TEXTURE_2D, mTextureID);
-    // 可以让纹理读取数据的时候按照设定的大小读取，这个值概念上跟linesize是一样的，这样就不会把无效的数据读取进去了
-    glPixelStorei(GL_UNPACK_ROW_LENGTH, mCurrentVideoFrame.linesize);
-    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, mCurrentVideoFrame.width, mCurrentVideoFrame.height, 0, GL_RGB, GL_UNSIGNED_BYTE, mCurrentVideoFrame.buffer);
-    // 数据已经发给显卡，可以删除 CPU 中的数据
-    if (mCurrentVideoFrame.buffer)
+    else
     {
-        delete [] mCurrentVideoFrame.buffer;
-        mCurrentVideoFrame.linesize = 0;
+        glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
+        glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+
+        std::unique_lock<std::mutex> lock(mMutexPlayFrame);
+
+        // 写入数据的时候，一定要先绑定纹理单元
+        glBindTexture(GL_TEXTURE_2D, mTextureID);
+        // 可以让纹理读取数据的时候按照设定的大小读取，这个值概念上跟linesize是一样的，这样就不会把无效的数据读取进去了
+        glPixelStorei(GL_UNPACK_ROW_LENGTH, mCurrentVideoFrame.linesize);
+        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, mCurrentVideoFrame.width, mCurrentVideoFrame.height, 0, GL_RGB, GL_UNSIGNED_BYTE, mCurrentVideoFrame.buffer);
+        // 数据已经发给显卡，可以删除 CPU 中的数据
+        if (mCurrentVideoFrame.buffer)
+        {
+            delete [] mCurrentVideoFrame.buffer;
+            mCurrentVideoFrame.linesize = 0;
+        }
+        lock.unlock();
+        glGenerateMipmap(GL_TEXTURE_2D);
+
+        glDrawElements(GL_QUADS, 4, GL_UNSIGNED_INT, 0);
+
+        // 播放状态下尝试截图
+        saveGrabImage();
     }
-    lock.unlock();
-    glGenerateMipmap(GL_TEXTURE_2D);
-
-    glDrawElements(GL_QUADS, 4, GL_UNSIGNED_INT, 0);
-
-    // 播放状态下尝试截图
-    saveGrabImage();
 }
 
 void WidgetPlayer::resizeGL(int w, int h)
