@@ -78,42 +78,42 @@
      <height>21</height>
     </rect>
    </property>
-   <widget class="QMenu" name="menu">
+   <widget class="QMenu" name="menuFile">
     <property name="title">
      <string>文件</string>
     </property>
     <addaction name="actionOpen"/>
     <addaction name="actionQuit"/>
    </widget>
-   <widget class="QMenu" name="menu_2">
+   <widget class="QMenu" name="menuAbout">
     <property name="title">
      <string>关于</string>
     </property>
     <addaction name="actionAbout"/>
    </widget>
-   <widget class="QMenu" name="menu_3">
+   <widget class="QMenu" name="menuSetting">
     <property name="title">
      <string>设置</string>
     </property>
     <addaction name="actionSetting"/>
    </widget>
-   <widget class="QMenu" name="menu_4">
+   <widget class="QMenu" name="menuTool">
     <property name="title">
      <string>工具</string>
     </property>
     <addaction name="actionGrapImage"/>
    </widget>
-   <widget class="QMenu" name="menu_5">
+   <widget class="QMenu" name="menuView">
     <property name="title">
      <string>视图</string>
     </property>
     <addaction name="actionList"/>
    </widget>
-   <addaction name="menu"/>
-   <addaction name="menu_3"/>
-   <addaction name="menu_4"/>
-   <addaction name="menu_5"/>
-   <addaction name="menu_2"/>
+   <addaction name="menuFile"/>
+   <addaction name="menuSetting"/>
+   <addaction name="menuTool"/>
+   <addaction name="menuView"/>
+   <addaction name="menuAbout"/>
   </widget>
   <action name="actionAbout">
    <property name="text">

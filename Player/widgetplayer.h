@@ -19,6 +19,11 @@ public:
     explicit WidgetPlayer(QWidget *parent = nullptr);
     ~WidgetPlayer();
 
+private:
+    void init();
+
+public:
+
     void play(const QString &path);
 
     // 开始播放

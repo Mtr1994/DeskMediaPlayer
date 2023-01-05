@@ -16,6 +16,25 @@
 
 WidgetPlayer::WidgetPlayer(QWidget *parent) : QOpenGLWidget(parent)
 {
+    init();
+}
+
+WidgetPlayer::~WidgetPlayer()
+{
+    mMediaPath.clear();
+    mMediaPlayFlag = false;
+    mCvParse.notify_one();
+    mCvPlayMedia.notify_all();
+
+    if (nullptr != mAudioOutput)
+    {
+        delete mAudioOutput;
+        mIODevice = nullptr;
+    }
+}
+
+void WidgetPlayer::init()
+{
     mCurrentVideoFrame.linesize = 0;
     mCurrentAudioFrame.pts = -1;
 
@@ -24,18 +43,10 @@ WidgetPlayer::WidgetPlayer(QWidget *parent) : QOpenGLWidget(parent)
     // 线程更新视频界面
     connect(this, &WidgetPlayer::sgl_thread_update_video_frame, this, [this] { update();}, Qt::QueuedConnection);
 
-    // 解决像素感问题，但是影响到截图功能
-//    QSurfaceFormat surfaceFormat;
-//    surfaceFormat.setSamples(24);
-//    setFormat(surfaceFormat);
-}
-
-WidgetPlayer::~WidgetPlayer()
-{
-    mMediaPath.clear();
-    mMediaPlayFlag = false;
-
-    if (nullptr != mAudioOutput) delete mAudioOutput;
+    // 解决锯齿问题
+    QSurfaceFormat surfaceFormat;
+    surfaceFormat.setSamples(24);
+    setFormat(surfaceFormat);
 }
 
 void WidgetPlayer::play(const QString &path)
@@ -152,7 +163,9 @@ void WidgetPlayer::initializeGL()
     initializeOpenGLFunctions();
 
     // 开启多重采样
-    //glEnable(GL_MULTISAMPLE);
+    glEnable(GL_MULTISAMPLE);
+
+
 
     // 着色器文件不能使用 UTF-8-BOM 编码，会报错，只能采用 UTF-8 编码qter
 
@@ -179,6 +192,8 @@ void WidgetPlayer::initializeGL()
         qDebug() << "link shader fail " << mShaderProgram.log();
         return;
     }
+
+    glEnable(GL_MULTISAMPLE);
 
     glUseProgram(mShaderProgram.programId());
 
@@ -243,8 +258,6 @@ void WidgetPlayer::initializeGL()
 
         // 解除绑定，防止其它操作影响到这个纹理
         glBindTexture(GL_TEXTURE_2D, 0);
-
-        qDebug() << "error 1 " << glGetError();
     }
 }
 
@@ -420,7 +433,7 @@ void WidgetPlayer::parse(const QString &path)
                 return;
             }
 
-            mAudioSampleSize = av_get_bytes_per_sample(AV_SAMPLE_FMT_FLT);
+            mAudioSampleSize = av_get_bytes_per_sample(AV_SAMPLE_FMT_S16);
             mSampleRate = codeCtxAudio->sample_rate;
             mAudioChannles = codeCtxAudio->channels;
             mAudioSampleFormat = codeCtxAudio->sample_fmt;
@@ -432,7 +445,6 @@ void WidgetPlayer::parse(const QString &path)
         }
     }
 
-    auto sampleSize = av_get_bytes_per_sample(AV_SAMPLE_FMT_U8);
     // 分配一个packet
     AVPacket *packet = av_packet_alloc();
     AVFrame *frame = av_frame_alloc();
@@ -526,7 +538,7 @@ void WidgetPlayer::parse(const QString &path)
                 uint8_t *buffer = new uint8_t[linesize0 * pixHeight * 3];
                 memset(buffer, 0, linesize0 * pixHeight * 3);
 
-                VideoFrame videoFrame = { frame->pts - mBeginVideoTimeStamp, pixWidth, pixHeight, sampleSize, 0, buffer, 0 };
+                VideoFrame videoFrame = { frame->pts - mBeginVideoTimeStamp, pixWidth, pixHeight, mAudioSampleSize, 0, buffer, 0 };
                 if (frame->format == AV_PIX_FMT_RGB24)
                 {
                     memcpy(buffer, frame->data[0], linesize0 * pixHeight * 3);
@@ -597,12 +609,11 @@ void WidgetPlayer::parse(const QString &path)
                     continue;
                 }
 
-                swrCtx = swr_alloc_set_opts(nullptr, frame->channel_layout, AV_SAMPLE_FMT_FLT, codeCtxAudio->sample_rate, codeCtxAudio->channel_layout, codeCtxAudio->sample_fmt, codeCtxAudio->sample_rate, 0, nullptr);
+                swrCtx = swr_alloc_set_opts(nullptr, frame->channel_layout, AV_SAMPLE_FMT_S16, codeCtxAudio->sample_rate, codeCtxAudio->channel_layout, codeCtxAudio->sample_fmt, codeCtxAudio->sample_rate, 0, nullptr);
                 swr_init(swrCtx);
-                int bufsize = av_samples_get_buffer_size(frame->linesize, frame->channels, frame->nb_samples, AV_SAMPLE_FMT_FLT, 0);
+                int bufsize = av_samples_get_buffer_size(nullptr, frame->channels, frame->nb_samples, AV_SAMPLE_FMT_S16, 0);
                 uint8_t *buf = new uint8_t[bufsize];
-                const int out_num_samples = av_rescale_rnd(swr_get_delay(swrCtx, frame->sample_rate) + frame->nb_samples, frame->sample_rate, frame->sample_rate, AV_ROUND_UP);
-                int tmpSize = swr_convert(swrCtx, &buf, out_num_samples, (const uint8_t**)(frame->data), frame->nb_samples);
+                int tmpSize = swr_convert(swrCtx, &buf, frame->nb_samples, (const uint8_t**)(frame->data), frame->nb_samples);
                 if (tmpSize <= 0)
                 {
                     delete [] buf;
@@ -745,8 +756,8 @@ void WidgetPlayer::playAudioFrame()
     audioFormat.setSampleRate(mSampleRate);
     audioFormat.setChannelCount(mAudioChannles);
     audioFormat.setSampleSize(8 * mAudioSampleSize);
-    audioFormat.setSampleType(QAudioFormat::Float);
-
+    audioFormat.setSampleType(QAudioFormat::SignedInt);
+    audioFormat.setByteOrder(QAudioFormat::LittleEndian);
     audioFormat.setCodec("audio/pcm");
 
     if (nullptr == mAudioOutput)
@@ -889,10 +900,11 @@ void WidgetPlayer::saveGrabImage()
 
     // 设定读取的内存对其方式 （只能为 1 2 4 8）
     glPixelStorei(GL_PACK_ALIGNMENT, 4);
-
     int x = (width() - textureWidth) / 2.0;
     int y = (height() - textureHeight) / 2.0;
-    // 从 FBO 读 可能会快 2 倍
+
+    // 这里的 FBO 为什么是 2 号，我不是很懂啊
+    glBindFramebuffer(GL_READ_FRAMEBUFFER, 2);
     glReadPixels(x, y, textureWidth, textureHeight, GL_RGB, GL_UNSIGNED_BYTE, buffer);
     auto func = [buffer, textureWidth, textureHeight]
     {
