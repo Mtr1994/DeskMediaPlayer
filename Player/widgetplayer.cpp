@@ -23,6 +23,11 @@ WidgetPlayer::WidgetPlayer(QWidget *parent) : QOpenGLWidget(parent)
 
     // 线程更新视频界面
     connect(this, &WidgetPlayer::sgl_thread_update_video_frame, this, [this] { update();}, Qt::QueuedConnection);
+
+    // 解决像素感问题，但是影响到截图功能
+//    QSurfaceFormat surfaceFormat;
+//    surfaceFormat.setSamples(24);
+//    setFormat(surfaceFormat);
 }
 
 WidgetPlayer::~WidgetPlayer()
@@ -41,6 +46,7 @@ void WidgetPlayer::play(const QString &path)
     {
         mMediaPlayFlag = false;
         mCvParse.notify_one();
+        mCvPlayMedia.notify_all();
 
         auto funcWait = std::bind(&WidgetPlayer::waitMediaPlayStop, this);
         std::thread threadWait(funcWait);
@@ -131,6 +137,7 @@ void WidgetPlayer::seek(int position)
     //qDebug() << "seek 1" << position;
     mSeekDuration = position + mBeginVideoTimeStamp;
     //qDebug() << "seek 2" << mSeekDuration;
+    mCvPlayMedia.notify_all();
 }
 
 void WidgetPlayer::grapImage()
@@ -147,7 +154,7 @@ void WidgetPlayer::initializeGL()
     // 开启多重采样
     //glEnable(GL_MULTISAMPLE);
 
-    // 着色器文件不能使用 UTF-8-BOM 编码，会报错，只能采用 UTF-8 编码
+    // 着色器文件不能使用 UTF-8-BOM 编码，会报错，只能采用 UTF-8 编码qter
 
     // 加载顶点着色器
     bool status = mShaderProgram.addShaderFromSourceFile(QOpenGLShader::Vertex, ":/Resource/shader/shader.vert");
@@ -226,7 +233,7 @@ void WidgetPlayer::initializeGL()
         // set texture filtering parameters
         // 使用 GL_LINEAR_MIPMAP_LINEAR 的时候，必须调用  glGenerateMipmap 函数
         // 这个多级渐远纹理可以让视频在缩小的时候，不会出现像素化的情况
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST_MIPMAP_NEAREST);
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
 
         // set the texture wrapping parameters
@@ -236,6 +243,8 @@ void WidgetPlayer::initializeGL()
 
         // 解除绑定，防止其它操作影响到这个纹理
         glBindTexture(GL_TEXTURE_2D, 0);
+
+        qDebug() << "error 1 " << glGetError();
     }
 }
 
@@ -268,6 +277,7 @@ void WidgetPlayer::paintGL()
 
         // 写入数据的时候，一定要先绑定纹理单元
         glBindTexture(GL_TEXTURE_2D, mTextureID);
+
         // 可以让纹理读取数据的时候按照设定的大小读取，这个值概念上跟linesize是一样的，这样就不会把无效的数据读取进去了
         glPixelStorei(GL_UNPACK_ROW_LENGTH, mCurrentVideoFrame.linesize);
         glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, mCurrentVideoFrame.width, mCurrentVideoFrame.height, 0, GL_RGB, GL_UNSIGNED_BYTE, mCurrentVideoFrame.buffer);
@@ -284,6 +294,8 @@ void WidgetPlayer::paintGL()
 
         // 播放状态下尝试截图
         saveGrabImage();
+
+        glBindTexture(GL_TEXTURE_2D, 0);
     }
 }
 
@@ -425,8 +437,6 @@ void WidgetPlayer::parse(const QString &path)
     AVPacket *packet = av_packet_alloc();
     AVFrame *frame = av_frame_alloc();
 
-    int milliseconds = 0;
-
     bool seekVideoFlag = false;
     bool seekAudioFlag = false;
 
@@ -435,219 +445,209 @@ void WidgetPlayer::parse(const QString &path)
     while (mMediaPlayFlag)
     {
         std::unique_lock<std::mutex> lock(mutexParse);
-        if((mQueueVideoFrame.size() < 10) || (mCvParse.wait_for(lock, std::chrono::milliseconds(milliseconds)) == std::cv_status::timeout))
+        mCvParse.wait(lock, [this]{ return !mMediaPlayFlag || mQueueVideoFrame.size() < 10; });
+
+        if (mSeekDuration >= 0)
         {
-            if (mSeekDuration >= 0)
+            // 清空已经读取的帧数据
+            if (nullptr != codeCtxVideo) avcodec_flush_buffers(codeCtxVideo);
+            if (nullptr != codeCtxAudio) avcodec_flush_buffers(codeCtxAudio);
+            avformat_flush(formatCtx);
+
+            int ret = av_seek_frame(formatCtx, videoStreamIndex, mSeekDuration, mSeekDuration <= mCurrentVideoFrame.pts ? AVSEEK_FLAG_BACKWARD : AVSEEK_FLAG_FRAME);
+            if (ret >= 0)
             {
-                // 清空已经读取的帧数据
-                if (nullptr != codeCtxVideo) avcodec_flush_buffers(codeCtxVideo);
-                if (nullptr != codeCtxAudio) avcodec_flush_buffers(codeCtxAudio);
-                avformat_flush(formatCtx);
-
-                int ret = av_seek_frame(formatCtx, videoStreamIndex, mSeekDuration, mSeekDuration <= mCurrentVideoFrame.pts ? AVSEEK_FLAG_BACKWARD : AVSEEK_FLAG_FRAME);
-                if (ret >= 0)
-                {
-                    mSeekDuration = -1;
-                    seekVideoFlag = true;
-                    seekAudioFlag = true;
-                }
-                else
-                {
-                    mArriveTargetFrame = true;
-                    mSeekDuration = -1;
-                    qDebug() << "seek video failed";
-                    continue;
-                }
-            }
-
-            ret = av_read_frame(formatCtx, packet);
-            if (ret < 0) break;
-
-            if (packet->stream_index == videoStreamIndex)
-            {
-                ret = avcodec_send_packet(codeCtxVideo, packet);
-                if (ret < 0)
-                {
-                    av_packet_unref(packet);
-                    continue;
-                }
-
-                SwsContext* pSwsCtx = nullptr;
-                while (ret >= 0)
-                {
-                    ret = avcodec_receive_frame(codeCtxVideo, frame);
-                    if (ret == AVERROR(EAGAIN) || ret == AVERROR_EOF)
-                    {
-                        av_frame_unref(frame);
-                        break;
-                    }
-                    else if (ret < 0)
-                    {
-                        av_frame_unref(frame);
-                        break;
-                    }
-
-                    frame->pts = frame->best_effort_timestamp;
-
-                    if (frame->pts == AV_NOPTS_VALUE) frame->pts = frame->pkt_dts = 1;
-
-                    if (mBeginVideoTimeStamp < 0)
-                    {
-                        mBeginVideoTimeStamp = frame->pts;
-                        qDebug() << "begin video time stamp " << mBeginVideoTimeStamp;
-                    }
-
-                    // 记录跳转位置
-                    if (seekVideoFlag)
-                    {
-                        mSeekVideoFrameDuration = frame->pts - mBeginVideoTimeStamp;
-                        seekVideoFlag = false;
-                    }
-
-                    if (nullptr == pSwsCtx)
-                    {
-                        pSwsCtx = sws_getContext(codeCtxVideo->width, codeCtxVideo->height, (AVPixelFormat)frame->format, codeCtxVideo->width, codeCtxVideo->height, AV_PIX_FMT_RGB24, SWS_BICUBIC, nullptr, nullptr, nullptr);
-                    }
-
-                    int pixWidth = frame->width;
-                    int pixHeight = frame->height;
-                    int linesize0 = frame->linesize[0];
-
-                    uint8_t *buffer = new uint8_t[linesize0 * pixHeight * 3];
-                    memset(buffer, 0, linesize0 * pixHeight * 3);
-
-                    VideoFrame videoFrame = { frame->pts - mBeginVideoTimeStamp, pixWidth, pixHeight, sampleSize, 0, buffer, 0 };
-                    if (frame->format == AV_PIX_FMT_RGB24)
-                    {
-                        memcpy(buffer, frame->data[0], linesize0 * pixHeight * 3);
-                        videoFrame.timebase = (double)codeCtxVideo->pkt_timebase.num / codeCtxVideo->pkt_timebase.den;
-                    }
-                    else
-                    {
-                        uint8_t *data[AV_NUM_DATA_POINTERS] = { buffer };
-                        int linesize[AV_NUM_DATA_POINTERS] = { linesize0 * 3, 0, 0, 0, 0, 0, 0, 0 };
-                        int ret = sws_scale(pSwsCtx, (uint8_t const * const *) frame->data, frame->linesize, 0, frame->height, data, linesize);
-                        if (ret <= 0)  memset(buffer, 0, linesize0 * pixHeight * 3);
-                        videoFrame.timebase = (double)codeCtxVideo->pkt_timebase.num / codeCtxVideo->pkt_timebase.den;
-                    }
-
-                    videoFrame.linesize = linesize0;
-
-                    // 根据实际数量，动态修改等待时间
-                    size_t size = mQueueVideoFrame.size();
-                    milliseconds = (int)size * 1000;
-
-                    mQueueVideoFrame.push(videoFrame);
-
-                    // 通知播放
-                    mCvPlayMedia.notify_all();
-
-                    av_frame_unref(frame);
-                }
-                av_packet_unref(packet);
-                sws_freeContext(pSwsCtx);
-            }
-            else if (packet->stream_index == audioStreamIndex)
-            {
-                ret = avcodec_send_packet(codeCtxAudio, packet);
-                if (ret < 0)
-                {
-                    av_packet_unref(packet);
-                    continue;
-                }
-
-                SwrContext* swrCtx = nullptr;
-                while (ret >= 0)
-                {
-                    ret = avcodec_receive_frame(codeCtxAudio, frame);
-                    if (ret == AVERROR(EAGAIN) || ret == AVERROR_EOF)
-                    {
-                        av_frame_unref(frame);
-                        break;
-                    }
-                    else if (ret < 0)
-                    {
-                        av_frame_unref(frame);
-                        break;
-                    }
-
-                    frame->pts = frame->best_effort_timestamp;
-
-                    if (mBeginAudioTimeStamp < 0)
-                    {
-                        mBeginAudioTimeStamp = frame->pts;
-                        qDebug() << "begin audio time stamp " << mBeginAudioTimeStamp;
-                    }
-
-                    // 记录跳转位置
-                    if (seekAudioFlag)
-                    {
-                        mSeekAudioFrameDuration = frame->pts - mBeginAudioTimeStamp;
-                        seekAudioFlag = false;
-                    }
-
-                    if (frame->best_effort_timestamp < 0)
-                    {
-                        av_frame_unref(frame);
-                        continue;
-                    }
-
-                    swrCtx = swr_alloc_set_opts(nullptr, frame->channel_layout, AV_SAMPLE_FMT_FLT, codeCtxAudio->sample_rate, codeCtxAudio->channel_layout, codeCtxAudio->sample_fmt, codeCtxAudio->sample_rate, 0, nullptr);
-                    swr_init(swrCtx);
-                    int bufsize = av_samples_get_buffer_size(frame->linesize, frame->channels, frame->nb_samples, AV_SAMPLE_FMT_FLT, 0);
-                    uint8_t *buf = new uint8_t[bufsize];
-                    const int out_num_samples = av_rescale_rnd(swr_get_delay(swrCtx, frame->sample_rate) + frame->nb_samples, frame->sample_rate, frame->sample_rate, AV_ROUND_UP);
-                    int tmpSize = swr_convert(swrCtx, &buf, out_num_samples, (const uint8_t**)(frame->data), frame->nb_samples);
-                    if (tmpSize <= 0)
-                    {
-                        delete [] buf;
-                        av_frame_unref(frame);
-                        break;
-                    }
-
-                    AudioFrame audio = { frame->pts - mBeginAudioTimeStamp, bufsize, 0, buf };
-                    audio.timebase = (double)codeCtxAudio->pkt_timebase.num / codeCtxAudio->pkt_timebase.den;
-                    mQueueAudioFrame.push(audio);
-                    
-                    mCvPlayMedia.notify_all();
-                    milliseconds = 0;
-
-                    av_frame_unref(frame);
-                }
-
-                av_packet_unref(packet);
-                swr_free(&swrCtx);
+                mSeekDuration = -1;
+                seekVideoFlag = true;
+                seekAudioFlag = true;
             }
             else
             {
-                ret = avcodec_send_packet(codeCtxAudio, packet);
-                if (ret < 0)
+                mArriveTargetFrame = true;
+                mSeekDuration = -1;
+                qDebug() << "seek video failed";
+                continue;
+            }
+        }
+
+        ret = av_read_frame(formatCtx, packet);
+        if (ret < 0) break;
+
+        if (packet->stream_index == videoStreamIndex)
+        {
+            ret = avcodec_send_packet(codeCtxVideo, packet);
+            if (ret < 0)
+            {
+                av_packet_unref(packet);
+                continue;
+            }
+
+            SwsContext* pSwsCtx = nullptr;
+            while (ret >= 0)
+            {
+                ret = avcodec_receive_frame(codeCtxVideo, frame);
+                if (ret == AVERROR(EAGAIN) || ret == AVERROR_EOF)
                 {
-                    av_packet_unref(packet);
+                    av_frame_unref(frame);
+                    break;
+                }
+                else if (ret < 0)
+                {
+                    av_frame_unref(frame);
+                    break;
+                }
+
+                frame->pts = frame->best_effort_timestamp;
+
+                if (frame->pts == AV_NOPTS_VALUE) frame->pts = frame->pkt_dts = 1;
+
+                if (mBeginVideoTimeStamp < 0)
+                {
+                    mBeginVideoTimeStamp = frame->pts;
+                    qDebug() << "begin video time stamp " << mBeginVideoTimeStamp;
+                }
+
+                // 记录跳转位置
+                if (seekVideoFlag)
+                {
+                    mSeekVideoFrameDuration = frame->pts - mBeginVideoTimeStamp;
+                    seekVideoFlag = false;
+                }
+
+                if (nullptr == pSwsCtx)
+                {
+                    pSwsCtx = sws_getContext(codeCtxVideo->width, codeCtxVideo->height, (AVPixelFormat)frame->format, codeCtxVideo->width, codeCtxVideo->height, AV_PIX_FMT_RGB24, SWS_BICUBIC, nullptr, nullptr, nullptr);
+                }
+
+                int pixWidth = frame->width;
+                int pixHeight = frame->height;
+                int linesize0 = frame->linesize[0];
+
+                uint8_t *buffer = new uint8_t[linesize0 * pixHeight * 3];
+                memset(buffer, 0, linesize0 * pixHeight * 3);
+
+                VideoFrame videoFrame = { frame->pts - mBeginVideoTimeStamp, pixWidth, pixHeight, sampleSize, 0, buffer, 0 };
+                if (frame->format == AV_PIX_FMT_RGB24)
+                {
+                    memcpy(buffer, frame->data[0], linesize0 * pixHeight * 3);
+                    videoFrame.timebase = (double)codeCtxVideo->pkt_timebase.num / codeCtxVideo->pkt_timebase.den;
+                }
+                else
+                {
+                    uint8_t *data[AV_NUM_DATA_POINTERS] = { buffer };
+                    int linesize[AV_NUM_DATA_POINTERS] = { linesize0 * 3, 0, 0, 0, 0, 0, 0, 0 };
+                    int ret = sws_scale(pSwsCtx, (uint8_t const * const *) frame->data, frame->linesize, 0, frame->height, data, linesize);
+                    if (ret <= 0)  memset(buffer, 0, linesize0 * pixHeight * 3);
+                    videoFrame.timebase = (double)codeCtxVideo->pkt_timebase.num / codeCtxVideo->pkt_timebase.den;
+                }
+
+                videoFrame.linesize = linesize0;
+                mQueueVideoFrame.push(videoFrame);
+
+                // 通知播放
+                mCvPlayMedia.notify_all();
+
+                av_frame_unref(frame);
+            }
+            av_packet_unref(packet);
+            sws_freeContext(pSwsCtx);
+        }
+        else if (packet->stream_index == audioStreamIndex)
+        {
+            ret = avcodec_send_packet(codeCtxAudio, packet);
+            if (ret < 0)
+            {
+                av_packet_unref(packet);
+                continue;
+            }
+
+            SwrContext* swrCtx = nullptr;
+            while (ret >= 0)
+            {
+                ret = avcodec_receive_frame(codeCtxAudio, frame);
+                if (ret == AVERROR(EAGAIN) || ret == AVERROR_EOF)
+                {
+                    av_frame_unref(frame);
+                    break;
+                }
+                else if (ret < 0)
+                {
+                    av_frame_unref(frame);
+                    break;
+                }
+
+                frame->pts = frame->best_effort_timestamp;
+
+                if (mBeginAudioTimeStamp < 0)
+                {
+                    mBeginAudioTimeStamp = frame->pts;
+                    qDebug() << "begin audio time stamp " << mBeginAudioTimeStamp;
+                }
+
+                // 记录跳转位置
+                if (seekAudioFlag)
+                {
+                    mSeekAudioFrameDuration = frame->pts - mBeginAudioTimeStamp;
+                    seekAudioFlag = false;
+                }
+
+                if (frame->best_effort_timestamp < 0)
+                {
+                    av_frame_unref(frame);
                     continue;
                 }
 
-                while (ret >= 0)
+                swrCtx = swr_alloc_set_opts(nullptr, frame->channel_layout, AV_SAMPLE_FMT_FLT, codeCtxAudio->sample_rate, codeCtxAudio->channel_layout, codeCtxAudio->sample_fmt, codeCtxAudio->sample_rate, 0, nullptr);
+                swr_init(swrCtx);
+                int bufsize = av_samples_get_buffer_size(frame->linesize, frame->channels, frame->nb_samples, AV_SAMPLE_FMT_FLT, 0);
+                uint8_t *buf = new uint8_t[bufsize];
+                const int out_num_samples = av_rescale_rnd(swr_get_delay(swrCtx, frame->sample_rate) + frame->nb_samples, frame->sample_rate, frame->sample_rate, AV_ROUND_UP);
+                int tmpSize = swr_convert(swrCtx, &buf, out_num_samples, (const uint8_t**)(frame->data), frame->nb_samples);
+                if (tmpSize <= 0)
                 {
-                    ret = avcodec_receive_frame(codeCtxAudio, frame);
-                    if (ret == AVERROR(EAGAIN) || ret == AVERROR_EOF)
-                    {
-                        av_frame_unref(frame);
-                        break;
-                    }
-                    else if (ret < 0)
-                    {
-                        av_frame_unref(frame);
-                        break;
-                    }
-
+                    delete [] buf;
                     av_frame_unref(frame);
+                    break;
                 }
 
-                av_packet_unref(packet);
+                AudioFrame audio = { frame->pts - mBeginAudioTimeStamp, bufsize, 0, buf };
+                audio.timebase = (double)codeCtxAudio->pkt_timebase.num / codeCtxAudio->pkt_timebase.den;
+                mQueueAudioFrame.push(audio);
 
-                milliseconds = 0;
+                mCvPlayMedia.notify_all();
+                av_frame_unref(frame);
             }
+
+            av_packet_unref(packet);
+            swr_free(&swrCtx);
+        }
+        else
+        {
+            ret = avcodec_send_packet(codeCtxAudio, packet);
+            if (ret < 0)
+            {
+                av_packet_unref(packet);
+                continue;
+            }
+
+            while (ret >= 0)
+            {
+                ret = avcodec_receive_frame(codeCtxAudio, frame);
+                if (ret == AVERROR(EAGAIN) || ret == AVERROR_EOF)
+                {
+                    av_frame_unref(frame);
+                    break;
+                }
+                else if (ret < 0)
+                {
+                    av_frame_unref(frame);
+                    break;
+                }
+
+                av_frame_unref(frame);
+            }
+
+            av_packet_unref(packet);
         }
     }
 
@@ -677,9 +677,12 @@ void WidgetPlayer::playVideoFrame()
         if (!mPraseThreadFlag && mQueueVideoFrame.empty()) break;
 
         VideoFrame frame;
-        if (mQueueVideoFrame.empty() || mMediaPauseFlag)
+        if (mMediaPlayFlag && (mQueueVideoFrame.empty() || (mMediaPauseFlag && (mSeekDuration < 0) && (mSeekVideoFrameDuration < 0))))
         {
-            mCvPlayMedia.wait(lockNextFrame, [this]{ return !mQueueVideoFrame.empty() && !mMediaPauseFlag; });
+            mCvPlayMedia.wait(lockNextFrame, [this]
+            {
+                return !mMediaPlayFlag || (!mQueueVideoFrame.empty() && (!mMediaPauseFlag || (mSeekDuration >= 0) || (mSeekVideoFrameDuration >= 0)));
+            });
             continue;
         }
 
@@ -719,6 +722,7 @@ void WidgetPlayer::playVideoFrame()
             emit AppSignal::getInstance()->sgl_thread_current_video_frame_time(frame.pts, frame.timebase);
         }
 
+        // 通知准备解析数据帧
         mCvParse.notify_one();
     }
 
@@ -736,7 +740,6 @@ void WidgetPlayer::playVideoFrame()
 void WidgetPlayer::playAudioFrame()
 {
     qDebug() << "play audio begin ";
-
     mPlayAudioThreadFlag = true;
     QAudioFormat audioFormat;
     audioFormat.setSampleRate(mSampleRate);
@@ -762,12 +765,15 @@ void WidgetPlayer::playAudioFrame()
     while (mMediaPlayFlag)
     {
         // 解析结束且视频帧为空的时候，关闭播放线程
-        if (!mPraseThreadFlag && mQueueVideoFrame.empty()) break;
+        if (!mPraseThreadFlag && mQueueAudioFrame.empty()) break;
 
         AudioFrame frame;
-        if (mQueueAudioFrame.empty() || mMediaPauseFlag)
+        if (mMediaPlayFlag && (mQueueAudioFrame.empty() || (mMediaPauseFlag && (mSeekDuration < 0) && (mSeekAudioFrameDuration < 0) )))
         {
-            mCvPlayMedia.wait(lockNextFrame, [this]{ return !mQueueAudioFrame.empty() && !mMediaPauseFlag; });
+            mCvPlayMedia.wait(lockNextFrame, [this]
+            {
+                return !mMediaPlayFlag || (!mQueueAudioFrame.empty() && (!mMediaPauseFlag || (mSeekDuration >= 0) || (mSeekAudioFrameDuration >= 0)));
+            });
             continue;
         }
         mQueueAudioFrame.wait_and_pop(frame);
