@@ -108,7 +108,6 @@ private:
     int mAudioSampleSize = 0;
     int mSampleRate = 0;
     int mAudioChannles = 0;
-    int mAudioSampleFormat = 0;
 
     // 视频跳转位置
     int64_t mSeekDuration = -1;

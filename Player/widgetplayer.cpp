@@ -108,7 +108,6 @@ void WidgetPlayer::clear()
     mAudioSampleSize = 0;
     mSampleRate = 0;
     mAudioChannles = 0;
-    mAudioSampleFormat = 0;
 
     if (nullptr != mAudioOutput)
     {
@@ -145,9 +144,9 @@ void WidgetPlayer::setAudioVolume(qreal volume)
 void WidgetPlayer::seek(int position)
 {
     mArriveTargetFrame = false;
-    //qDebug() << "seek 1" << position;
+    qDebug() << "seek 1" << position;
     mSeekDuration = position + mBeginVideoTimeStamp;
-    //qDebug() << "seek 2" << mSeekDuration;
+    qDebug() << "seek 2" << mSeekDuration;
     mCvPlayMedia.notify_all();
 }
 
@@ -164,8 +163,6 @@ void WidgetPlayer::initializeGL()
 
     // 开启多重采样
     glEnable(GL_MULTISAMPLE);
-
-
 
     // 着色器文件不能使用 UTF-8-BOM 编码，会报错，只能采用 UTF-8 编码qter
 
@@ -436,7 +433,6 @@ void WidgetPlayer::parse(const QString &path)
             mAudioSampleSize = av_get_bytes_per_sample(AV_SAMPLE_FMT_S16);
             mSampleRate = codeCtxAudio->sample_rate;
             mAudioChannles = codeCtxAudio->channels;
-            mAudioSampleFormat = codeCtxAudio->sample_fmt;
 
             // 存在音频流，准备播放
             auto funcPlayAudio= std::bind(&WidgetPlayer::playAudioFrame, this);
@@ -513,11 +509,7 @@ void WidgetPlayer::parse(const QString &path)
 
                 if (frame->pts == AV_NOPTS_VALUE) frame->pts = frame->pkt_dts = 1;
 
-                if (mBeginVideoTimeStamp < 0)
-                {
-                    mBeginVideoTimeStamp = frame->pts;
-                    qDebug() << "begin video time stamp " << mBeginVideoTimeStamp;
-                }
+                if (mBeginVideoTimeStamp == -1) mBeginVideoTimeStamp = frame->pts;
 
                 // 记录跳转位置
                 if (seekVideoFlag)
@@ -589,24 +581,15 @@ void WidgetPlayer::parse(const QString &path)
                 }
 
                 frame->pts = frame->best_effort_timestamp;
+                if (frame->pts == AV_NOPTS_VALUE) frame->pts = frame->pkt_dts = 0;
 
-                if (mBeginAudioTimeStamp < 0)
-                {
-                    mBeginAudioTimeStamp = frame->pts;
-                    qDebug() << "begin audio time stamp " << mBeginAudioTimeStamp;
-                }
+                if (mBeginAudioTimeStamp == -1) mBeginAudioTimeStamp = frame->pts;
 
                 // 记录跳转位置
                 if (seekAudioFlag)
                 {
                     mSeekAudioFrameDuration = frame->pts - mBeginAudioTimeStamp;
                     seekAudioFlag = false;
-                }
-
-                if (frame->best_effort_timestamp < 0)
-                {
-                    av_frame_unref(frame);
-                    continue;
                 }
 
                 swrCtx = swr_alloc_set_opts(nullptr, frame->channel_layout, AV_SAMPLE_FMT_S16, codeCtxAudio->sample_rate, codeCtxAudio->channel_layout, codeCtxAudio->sample_fmt, codeCtxAudio->sample_rate, 0, nullptr);
@@ -801,8 +784,6 @@ void WidgetPlayer::playAudioFrame()
             continue;
         }
 
-        // qDebug() << "play video frame " << frame.pts;
-
         if (mSeekAudioFrameDuration == frame.pts)
         {
             mSeekAudioFrameDuration = -1;
@@ -812,8 +793,9 @@ void WidgetPlayer::playAudioFrame()
 
         if (mCurrentAudioFrame.pts > 0)
         {
-			delete[] mCurrentAudioFrame.data;
-			mCurrentAudioFrame.data = nullptr;
+            delete[] mCurrentAudioFrame.data;
+            mCurrentAudioFrame.data = nullptr;
+            mCurrentAudioFrame.pts = -1;
         }
 
         mCurrentAudioFrame = frame;
