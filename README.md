@@ -1,13 +1,11 @@
 # DeskMediaPlayer
 
-![Platform](https://img.shields.io/badge/paltform-win10--64-brightgreen)
-![Qt Version](https://img.shields.io/badge/_Qt_5.15.2-yellowgreen)
+![Platform](https://img.shields.io/badge/paltform-Win10--64-brightgreen)
+![Qt Version](https://img.shields.io/badge/IDE_Qt_5.15.2-yellowgreen)
 ![Build](https://img.shields.io/badge/build-MSVC_2019_x64-blue)
 ![GitHub](https://img.shields.io/github/license/Mtr1994/DeskMediaPlayer)
 
   视频播放器程序，使用 FFMPEG 框架编写，采用 `OpenGL` 绘制纹理。
-
-
 
 #### 一、技术要点
 
@@ -19,11 +17,18 @@
 
 ​	4、修改视频、音频等线程的循环逻辑，大幅降低 `CPU` 使用率
 
-#### 二、更新日志
+#### 二、后期功能
+
+* 进度条点击跳转功能（符合常识）
+* 文件列表功能（比较常见）
+* 添加播放媒体的路径等信息（播放的时候都不知道播放的名称）
+
+#### 三、更新日志
 
 ##### 2003年01月06日
 
 - [x] 优化音频因为 `PTS` 不正确而播放异常的问题
+- [x] 添加了列表功能，可以一次打开多个视频文件，额外的会保存在列表中
 
 ##### 2003年01月05日
 

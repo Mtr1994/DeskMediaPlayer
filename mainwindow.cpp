@@ -60,6 +60,8 @@ void MainWindow::init()
     connect(AppSignal::getInstance(), &AppSignal::sgl_change_audio_volume, this, &MainWindow::slot_change_audio_volume);
     connect(AppSignal::getInstance(), &AppSignal::sgl_seek_video_position, this, &MainWindow::slot_seek_video_position);
     connect(AppSignal::getInstance(), &AppSignal::sgl_media_show_full_screen, this, &MainWindow::slot_media_show_full_screen);
+    connect(AppSignal::getInstance(), &AppSignal::sgl_system_output_message, this, &MainWindow::slot_system_output_message);
+    connect(AppSignal::getInstance(), &AppSignal::sgl_start_play_target_media, this, &MainWindow::slot_start_play_target_media);
     connect(AppSignal::getInstance(), &AppSignal::sgl_thread_save_capture_status, this, &MainWindow::slot_thread_save_capture_status, Qt::QueuedConnection);
 
     // 默认测试播放
@@ -94,10 +96,16 @@ void MainWindow::slot_show_about_developer()
 
 void MainWindow::slot_open_video_file()
 {
-    QString fileName = QFileDialog::getOpenFileName(nullptr, tr("选择视频文件"), QStandardPaths::writableLocation(QStandardPaths::DesktopLocation), tr("视频文件 (*.mp4 *.mkv *.avi *.mov *.flv *.wmv *.mpg *.m4v *.ts)"));
-    if (fileName.isEmpty()) return;
+    QStringList fileNameList = QFileDialog::getOpenFileNames(nullptr, tr("选择视频文件"), QStandardPaths::writableLocation(QStandardPaths::DesktopLocation), tr("视频文件 (*.mp4 *.mkv *.avi *.mov *.flv *.wmv *.mpg *.m4v *.ts)"));
+    if (fileNameList.isEmpty()) return;
 
-    ui->widgetOpenGLPlayer->play(fileName);
+    // 添加到列表
+    for (auto &path : fileNameList)
+    {
+        ui->widgetMediaControl->addMediaPath(path);
+    }
+
+    emit AppSignal::getInstance()->sgl_start_play_target_media(fileNameList.first());
 }
 
 void MainWindow::slot_media_show_full_screen()
@@ -113,6 +121,17 @@ void MainWindow::slot_thread_save_capture_status(bool status, const QString &pat
     int type = status ? MessageWidget::M_Success : MessageWidget::M_Error;
     MessageWidget *widget = new MessageWidget(type, MessageWidget::P_Top_Center, this);
     widget->showMessage(status ? "截图已保存到桌面" : "无法保存空的图片");
+}
+
+void MainWindow::slot_system_output_message(const QString &message)
+{
+    MessageWidget *widget = new MessageWidget(MessageWidget::M_Info, MessageWidget::P_Top_Center, this);
+    widget->showMessage(message);
+}
+
+void MainWindow::slot_start_play_target_media(const QString &path)
+{
+    ui->widgetOpenGLPlayer->play(path);
 }
 
 void MainWindow::keyPressEvent(QKeyEvent *event)

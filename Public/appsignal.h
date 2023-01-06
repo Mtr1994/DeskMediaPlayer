@@ -41,6 +41,12 @@ signals:
 
     // 截图保存完成
     void sgl_thread_save_capture_status(bool status, const QString &path);
+
+    // 全局消息
+    void sgl_system_output_message(const QString &message);
+
+    // 开始播放视频
+    void sgl_start_play_target_media(const QString &path);
 };
 
 #endif // APPSIGNAL_H

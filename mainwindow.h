@@ -38,6 +38,10 @@ private slots:
 
     void slot_thread_save_capture_status(bool status, const QString &path);
 
+    void slot_system_output_message(const QString &message);
+
+    void slot_start_play_target_media(const QString &path);
+
 private:
     Ui::MainWindow *ui;
 };

@@ -13,5 +13,6 @@
         <file>Resource/image/error.svg</file>
         <file>Resource/image/info.svg</file>
         <file>Resource/image/success.svg</file>
+        <file>Resource/image/media_list.svg</file>
     </qresource>
 </RCC>

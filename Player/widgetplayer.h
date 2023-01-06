@@ -46,7 +46,7 @@ public:
 
 signals:
     void sgl_thread_update_video_frame();
-    void sgl_thread_media_play_stop();
+    void sgl_thread_auto_play_current_media();
 
 protected:
     void initializeGL();
@@ -64,7 +64,7 @@ private:
     void playAudioFrame();
 
     // 等待当前播放线程结束
-    void waitMediaPlayStop();
+    void listenMediaPlayStatus();
 
     uint64_t getCurrentMillisecond();
 
@@ -73,7 +73,7 @@ private:
     void saveGrabImage();
 
 private slots:
-    void slot_thread_media_play_stop();
+    void slot_thread_auto_play_current_media();
 
 private:
     QOpenGLShaderProgram mShaderProgram;
@@ -163,6 +163,9 @@ private:
 
     // 是否需要截图
     bool mUserGrapImage = false;
+
+    // 是否需要自动开始播放当前 mMediaPath 代表的视频
+    bool mAutoPlayMedia = false;
 };
 
 #endif // WIDGETPLAYER_H

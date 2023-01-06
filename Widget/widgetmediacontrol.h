@@ -19,6 +19,8 @@ public:
 
     void changePlayStatus();
 
+    void addMediaPath(const QString &path);
+
 private slots:
     void slot_btn_play_previous_frame();
 
@@ -34,6 +36,10 @@ private slots:
 
     void slot_thread_finish_play_video();
 
+    void slot_btn_media_list_click();
+
+    void slot_start_play_target_media(const QString &path);
+
 private:
     Ui::WidgetMediaControl *ui;
 
@@ -42,6 +48,12 @@ private:
 
     //
     double mMediaTimeBase = 0.0;
+
+    // 播放过的视频路径
+    QStringList mListMediaPath;
+
+    // 当前播放地址
+    QString mCurrentMediaPath;
 };
 
 #endif // WIDGETMEDIACONTROL_H

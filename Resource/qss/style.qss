@@ -184,11 +184,10 @@ QPushButton#btnNextFrame:pressed
     padding: 0.24em;
 }
 
-QPushButton#btnFullScreen
+QPushButton[MediaTool]
 {
     font-size: 9pt;
     background-color: transparent;
-    image: url(:/Resource/image/full_screen.svg);
     max-height: 1.24em;
     max-width: 1.24em;
     min-height: 1.24em;
@@ -196,14 +195,24 @@ QPushButton#btnFullScreen
     padding: 0.2em;
 }
 
-QPushButton#btnFullScreen:hover
+QPushButton[MediaTool]:hover
 {
     padding: 0.1em;
 }
 
-QPushButton#btnFullScreen:pressed
+QPushButton[MediaTool]:pressed
 {
     padding: 0.2em;
+}
+
+QPushButton#btnFullScreen
+{
+    image: url(:/Resource/image/full_screen.svg);
+}
+
+QPushButton#btnMediaList
+{
+    image: url(:/Resource/image/media_list.svg);
 }
 
 /* QSlider */
@@ -299,5 +308,74 @@ QMenu::item:disabled
 QMenu::item:selected
 {
     background-color: #343434;
+}
+
+/* QListView */
+QListView#lvMediaPathList
+{
+    border: none;;
+    background-color: #fefefe;
+    outline: none;
+    border-radius: 0.5em;
+    margin-right: 0;
+    padding-top: 0.5em;
+    padding-bottom: 0.5em;
+}
+
+QListView#lvMediaPathList::item
+{
+    min-height: 3em;
+    border: none;
+    padding-left: 1em;
+    border-radius: 0.36em;
+}
+
+QListView#lvMediaPathList::item:hover
+{
+    color: #1890ff;
+}
+
+QListView#lvMediaPathList::item:selected
+{
+    color: #1890ff;
+    outline: none;
+    background-color: #e6f7ff;
+}
+
+/* QScrollBar */
+QScrollBar::vertical
+{
+    background-color: #d0d0d0;
+    border: 1px solid #d0d0d0;
+    border-radius: 0.2em;
+    margin: 0, 0, 0, 0;
+    width: 0.4em;
+}
+
+QScrollBar::handle:vertical
+{
+    background-color: #fc9153;
+    border: none;
+    border-radius: 0.2em;
+    min-height: 3em;
+    width: 0.4em;
+}
+
+QScrollBar::add-line:vertical {
+    height: 0em;
+    subcontrol-origin: margin;
+}
+
+QScrollBar::sub-line:vertical {
+    height: 0em;
+    subcontrol-origin:margin;
+}
+
+QScrollBar::sub-page {
+    background: rgba(0, 0, 0, 6);
+}
+
+QScrollBar::add-page {
+    background: rgba(0, 0, 0, 6);
 }
 

@@ -2,6 +2,8 @@
 #include "ui_widgetmediacontrol.h"
 #include "Public/appsignal.h"
 #include "Configure/softconfig.h"
+#include "Control/Drawer/widgetdrawer.h"
+#include "widgetmediapathlist.h"
 
 #include <thread>
 
@@ -31,6 +33,8 @@ void WidgetMediaControl::init()
     connect(ui->btnPlay, &QPushButton::clicked, this, &WidgetMediaControl::slot_btn_play_click);
     connect(ui->btnNextFrame, &QPushButton::clicked, this, &WidgetMediaControl::slot_btn_play_next_frame);
 
+    connect(ui->btnMediaList, &QPushButton::clicked, this, &WidgetMediaControl::slot_btn_media_list_click);
+
     // 全屏显示
     connect(ui->btnFullScreen, &QPushButton::clicked, AppSignal::getInstance(), &AppSignal::sgl_media_show_full_screen);
 
@@ -46,6 +50,7 @@ void WidgetMediaControl::init()
     });
 
     connect(AppSignal::getInstance(), &AppSignal::sgl_init_media_duration, this, &WidgetMediaControl::slot_init_media_duration);
+    connect(AppSignal::getInstance(), &AppSignal::sgl_start_play_target_media, this, &WidgetMediaControl::slot_start_play_target_media);
     connect(AppSignal::getInstance(), &AppSignal::sgl_thread_current_video_frame_time, this, &WidgetMediaControl::slot_thread_current_video_frame_time, Qt::QueuedConnection);
     connect(AppSignal::getInstance(), &AppSignal::sgl_thread_finish_play_video, this, &WidgetMediaControl::slot_thread_finish_play_video, Qt::QueuedConnection);
 }
@@ -54,6 +59,12 @@ void WidgetMediaControl::changePlayStatus()
 {
     ui->btnPlay->setChecked(!ui->btnPlay->isChecked());
     slot_btn_play_click();
+}
+
+void WidgetMediaControl::addMediaPath(const QString &path)
+{
+    if (mListMediaPath.contains(path)) return;
+    mListMediaPath.append(path);
 }
 
 void WidgetMediaControl::slot_btn_play_previous_frame()
@@ -129,4 +140,19 @@ void WidgetMediaControl::slot_thread_current_video_frame_time(int64_t pts, float
 void WidgetMediaControl::slot_thread_finish_play_video()
 {
     slot_thread_current_video_frame_time(ui->slider->maximum(), mMediaTimeBase);
+}
+
+void WidgetMediaControl::slot_btn_media_list_click()
+{
+    WidgetDrawer *drawer = new WidgetDrawer(this->nativeParentWidget());
+    WidgetMediaPathList *sub = new WidgetMediaPathList;
+    sub->setMediaPaths(mListMediaPath);
+    sub->setCurrentMediaPaths(mCurrentMediaPath);
+    drawer->setContentWidget(sub);
+    drawer->showDrawer();
+}
+
+void WidgetMediaControl::slot_start_play_target_media(const QString &path)
+{
+    mCurrentMediaPath = path;
 }

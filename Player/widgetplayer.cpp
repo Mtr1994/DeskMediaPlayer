@@ -21,16 +21,8 @@ WidgetPlayer::WidgetPlayer(QWidget *parent) : QOpenGLWidget(parent)
 
 WidgetPlayer::~WidgetPlayer()
 {
-    mMediaPath.clear();
-    mMediaPlayFlag = false;
     mCvParse.notify_one();
     mCvPlayMedia.notify_all();
-
-    if (nullptr != mAudioOutput)
-    {
-        delete mAudioOutput;
-        mIODevice = nullptr;
-    }
 }
 
 void WidgetPlayer::init()
@@ -38,7 +30,7 @@ void WidgetPlayer::init()
     mCurrentVideoFrame.linesize = 0;
     mCurrentAudioFrame.pts = -1;
 
-    connect(this, &WidgetPlayer::sgl_thread_media_play_stop, this, &WidgetPlayer::slot_thread_media_play_stop, Qt::QueuedConnection);
+    connect(this, &WidgetPlayer::sgl_thread_auto_play_current_media, this, &WidgetPlayer::slot_thread_auto_play_current_media, Qt::QueuedConnection);
 
     // 线程更新视频界面
     connect(this, &WidgetPlayer::sgl_thread_update_video_frame, this, [this] { update();}, Qt::QueuedConnection);
@@ -51,21 +43,24 @@ void WidgetPlayer::init()
 
 void WidgetPlayer::play(const QString &path)
 {
+    // 正在播放该视频，就不用响应
+    if (mMediaPlayFlag && (mMediaPath == path)) return;
+
     mMediaPath = path;
-    qDebug() << "mMediaPlayFlag " << mMediaPlayFlag;
     if (mMediaPlayFlag)
     {
+        qDebug() << "------------------------------------------------------------ 中途加入视频要开始了 ------------------------------------------------------------";
+        mAutoPlayMedia = true;
         mMediaPlayFlag = false;
+
         mCvParse.notify_one();
         mCvPlayMedia.notify_all();
-
-        auto funcWait = std::bind(&WidgetPlayer::waitMediaPlayStop, this);
-        std::thread threadWait(funcWait);
-        threadWait.detach();
     }
     else
     {
         if (mMediaPath.isEmpty()) return;
+
+        qDebug() << "------------------------------------------------------------ 自然加入视频要开始了 ------------------------------------------------------------";
 
         mMediaPlayFlag = true;
 
@@ -109,6 +104,9 @@ void WidgetPlayer::clear()
     mSampleRate = 0;
     mAudioChannles = 0;
 
+    // 不能清理这个值
+    // mAutoPlayMedia = false;
+
     if (nullptr != mAudioOutput)
     {
         mAudioOutput->stop();
@@ -144,9 +142,9 @@ void WidgetPlayer::setAudioVolume(qreal volume)
 void WidgetPlayer::seek(int position)
 {
     mArriveTargetFrame = false;
-    qDebug() << "seek 1" << position;
+    //qDebug() << "seek 1" << position;
     mSeekDuration = position + mBeginVideoTimeStamp;
-    qDebug() << "seek 2" << mSeekDuration;
+    //qDebug() << "seek 2" << mSeekDuration;
     mCvPlayMedia.notify_all();
 }
 
@@ -262,21 +260,17 @@ void WidgetPlayer::paintGL()
 {
     glViewport((width() - mTextureWidth) / 2.0, (height() - mTextureHeight) / 2.0, mTextureWidth, mTextureHeight);
 
-    if (!mPlayVideoThreadFlag)
+    if (!mMediaPlayFlag)
     {
+        glBindTexture(GL_TEXTURE_2D, mTextureID);
         glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
-        return;
     }
     else if (mCurrentVideoFrame.linesize <= 0)
     {
         glBindTexture(GL_TEXTURE_2D, mTextureID);
         glGenerateMipmap(GL_TEXTURE_2D);
         glDrawElements(GL_QUADS, 4, GL_UNSIGNED_INT, 0);
-
-        // 暂停状态下尝试截图
-        saveGrabImage();
-        return;
     }
     else
     {
@@ -298,15 +292,15 @@ void WidgetPlayer::paintGL()
             mCurrentVideoFrame.linesize = 0;
         }
         lock.unlock();
+
         glGenerateMipmap(GL_TEXTURE_2D);
-
         glDrawElements(GL_QUADS, 4, GL_UNSIGNED_INT, 0);
-
-        // 播放状态下尝试截图
-        saveGrabImage();
-
-        glBindTexture(GL_TEXTURE_2D, 0);
     }
+
+    // 截图
+    saveGrabImage();
+
+    glBindTexture(GL_TEXTURE_2D, 0);
 }
 
 void WidgetPlayer::resizeGL(int w, int h)
@@ -338,7 +332,8 @@ void WidgetPlayer::parse(const QString &path)
     ret = avformat_open_input(&formatCtx, path.toStdString().c_str(), 0, 0);
     if (ret < 0)
     {
-        printf("Could not open input file \n");
+        qDebug() << "Could not open input file \n";
+        emit AppSignal::getInstance()->sgl_system_output_message("打开媒体文件失败");
         mPraseThreadFlag = false;
         return;
     }
@@ -347,14 +342,14 @@ void WidgetPlayer::parse(const QString &path)
     ret = avformat_find_stream_info(formatCtx, 0);
     if (ret < 0)
     {
-        printf("Failed to retrieve input stream information\n");
+        qDebug() << "Failed to retrieve input stream information\n";
         mPraseThreadFlag = false;
         return;
     }
 
     if (formatCtx->nb_streams == 0)
     {
-        printf("can not find stream\n");
+        qDebug() << "Can not find stream\n";
         mPraseThreadFlag = false;
         return;
     }
@@ -385,7 +380,7 @@ void WidgetPlayer::parse(const QString &path)
             ///打开解码器
             if (avcodec_open2(codeCtxVideo, pCodecVideo, NULL) < 0)
             {
-                printf("Could not open codec.");
+                qDebug() << "Could not open video codec.";
                 mPraseThreadFlag = false;
                 return;
             }
@@ -425,7 +420,7 @@ void WidgetPlayer::parse(const QString &path)
             ///打开解码器
             if (avcodec_open2(codeCtxAudio, pCodecAudio, NULL) < 0)
             {
-                printf("Could not open codec.");
+                qDebug() << "Could not open audio codec.";
                 mPraseThreadFlag = false;
                 return;
             }
@@ -440,6 +435,11 @@ void WidgetPlayer::parse(const QString &path)
             threadPlayAudio.detach();
         }
     }
+
+    // 解析线程启动后，就要配置一个停止线程
+    auto funcWait = std::bind(&WidgetPlayer::listenMediaPlayStatus, this);
+    std::thread threadWait(funcWait);
+    threadWait.detach();
 
     // 分配一个packet
     AVPacket *packet = av_packet_alloc();
@@ -653,10 +653,10 @@ void WidgetPlayer::parse(const QString &path)
 
     mPraseThreadFlag = false;
 
-    // 通知可能存在的关闭等待线程
-    mCvCloseMedia.notify_one();
-
     qDebug() << "parse media over ";
+
+    // 通知关闭等待线程
+    mCvCloseMedia.notify_one();
 }
 
 void WidgetPlayer::playVideoFrame()
@@ -724,11 +724,8 @@ void WidgetPlayer::playVideoFrame()
 
     qDebug() << "play video over ";
 
-    // 通知可能存在的关闭等待线程
+    // 通知关闭等待线程
     mCvCloseMedia.notify_one();
-
-    // 为了保证触发，视频和音频线程都发一次
-    emit AppSignal::getInstance()->sgl_thread_finish_play_video();
 }
 
 void WidgetPlayer::playAudioFrame()
@@ -808,28 +805,40 @@ void WidgetPlayer::playAudioFrame()
     }
 
     mPlayAudioThreadFlag = false;
+
     qDebug() << "play audio over ";
 
-    // 通知可能存在的关闭等待线程
+    // 通知关闭等待线程
     mCvCloseMedia.notify_one();
-
-    // 为了保证触发，视频和音频线程都发一次
-    emit AppSignal::getInstance()->sgl_thread_finish_play_video();
 }
 
-void WidgetPlayer::waitMediaPlayStop()
+void WidgetPlayer::listenMediaPlayStatus()
 {
     std::unique_lock<std::mutex> lock(mMutexCloseMedia);
     while (true)
     {
-        mCvCloseMedia.wait(lock, [this]{ qDebug() << "try close media " << mPraseThreadFlag << " " << mPlayVideoThreadFlag << " " << mPlayAudioThreadFlag; return !mPraseThreadFlag && !mPlayVideoThreadFlag && !mPlayAudioThreadFlag; });
+        mCvCloseMedia.wait(lock, [this]
+        {
+            qDebug() << "try close media " << mPraseThreadFlag << " " << mPlayVideoThreadFlag << " " << mPlayAudioThreadFlag;
+            return !mPraseThreadFlag && !mPlayVideoThreadFlag && !mPlayAudioThreadFlag;
+        });
         break;
     }
+
+    // 清理最后一帧画面
+    emit sgl_thread_update_video_frame();
 
     // 彻底停止解析 播放视频 播放音频 后再清理状态
     clear();
 
-    emit sgl_thread_media_play_stop();
+    qDebug() << "------------------------------------------------------------ 旧的视频被关闭了 ------------------------------------------------------------";
+
+    // 发送视频结束信号
+    emit AppSignal::getInstance()->sgl_thread_finish_play_video();
+
+    if (!mAutoPlayMedia) return;
+    mAutoPlayMedia = false;
+    emit sgl_thread_auto_play_current_media();
 }
 
 uint64_t WidgetPlayer::getCurrentMillisecond()
@@ -908,7 +917,7 @@ void WidgetPlayer::saveGrabImage()
     th.detach();
 }
 
-void WidgetPlayer::slot_thread_media_play_stop()
+void WidgetPlayer::slot_thread_auto_play_current_media()
 {
     play(mMediaPath);
 }

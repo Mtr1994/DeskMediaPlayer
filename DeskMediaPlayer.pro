@@ -37,17 +37,20 @@ DESTDIR = ../output
 
 SOURCES += \
     Configure/softconfig.cpp \
+    Control/Drawer/widgetdrawer.cpp \
     Control/Message/messagewidget.cpp \
     Dialog/dialogversion.cpp \
     Player/widgetplayer.cpp \
     Public/appsignal.cpp \
     Widget/widgetmediacontrol.cpp \
+    Widget/widgetmediapathlist.cpp \
     main.cpp \
     mainwindow.cpp
 
 HEADERS += \
     Common/common.h \
     Configure/softconfig.h \
+    Control/Drawer/widgetdrawer.h \
     Control/Message/messagewidget.h \
     Dialog/dialogversion.h \
     Player/widgetplayer.h \
@@ -55,11 +58,13 @@ HEADERS += \
     Public/ffmpeg.h \
     Public/threadsafequeue.h \
     Widget/widgetmediacontrol.h \
+    Widget/widgetmediapathlist.h \
     mainwindow.h
 
 FORMS += \
     Dialog/dialogversion.ui \
     Widget/widgetmediacontrol.ui \
+    Widget/widgetmediapathlist.ui \
     mainwindow.ui
 
 TRANSLATIONS += \
