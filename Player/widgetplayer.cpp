@@ -656,6 +656,7 @@ void WidgetPlayer::parse(const QString &path)
     qDebug() << "parse media over ";
 
     // 通知关闭等待线程
+    std::unique_lock<std::mutex> lock(mMutexCloseMedia);
     mCvCloseMedia.notify_one();
 }
 
@@ -725,6 +726,7 @@ void WidgetPlayer::playVideoFrame()
     qDebug() << "play video over ";
 
     // 通知关闭等待线程
+    std::unique_lock<std::mutex> lock(mMutexCloseMedia);
     mCvCloseMedia.notify_one();
 }
 
@@ -809,6 +811,7 @@ void WidgetPlayer::playAudioFrame()
     qDebug() << "play audio over ";
 
     // 通知关闭等待线程
+    std::unique_lock<std::mutex> lock(mMutexCloseMedia);
     mCvCloseMedia.notify_one();
 }
 
@@ -833,10 +836,12 @@ void WidgetPlayer::listenMediaPlayStatus()
 
     qDebug() << "------------------------------------------------------------ 旧的视频被关闭了 ------------------------------------------------------------";
 
-    // 发送视频结束信号
-    emit AppSignal::getInstance()->sgl_thread_finish_play_video();
-
-    if (!mAutoPlayMedia) return;
+    if (!mAutoPlayMedia)
+    {
+        // 发送视频结束信号
+        emit AppSignal::getInstance()->sgl_thread_finish_play_video();
+        return;
+    }
     mAutoPlayMedia = false;
     emit sgl_thread_auto_play_current_media();
 }
