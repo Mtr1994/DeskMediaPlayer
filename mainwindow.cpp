@@ -19,7 +19,7 @@ MainWindow::MainWindow(QWidget *parent)
 
     init();
 
-    setWindowTitle("Mtr1994 Player");
+    setWindowTitle("Mtr1994");
 }
 
 MainWindow::~MainWindow()
