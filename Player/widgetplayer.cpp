@@ -502,7 +502,11 @@ void WidgetPlayer::parse(const QString &path)
         }
 
         ret = av_read_frame(formatCtx, packet);
-        if (ret < 0) break;
+        if (ret < 0)
+        {
+            qDebug() << "can not find any frame";
+            break;
+        }
 
         if (packet->stream_index == videoStreamIndex)
         {
@@ -676,6 +680,9 @@ void WidgetPlayer::parse(const QString &path)
 
     mPraseThreadFlag = false;
 
+    // 通知播放线程
+    mCvPlayMedia.notify_all();
+
     qDebug() << "parse media over ";
 
     // 通知关闭等待线程
@@ -694,16 +701,16 @@ void WidgetPlayer::playVideoFrame()
         // 解析结束且视频帧为空的时候，关闭播放线程
         if (!mPraseThreadFlag && mQueueVideoFrame.empty()) break;
 
-        VideoFrame frame;
-        if (mMediaPlayFlag && (mQueueVideoFrame.empty() || (mMediaPauseFlag && (mSeekDuration < 0) && (mSeekVideoFrameDuration < 0))))
+        if (mMediaPlayFlag && (mQueueVideoFrame.empty() || (mMediaPauseFlag && (mSeekDuration < 0))))
         {
             mCvPlayMedia.wait(lockNextFrame, [this]
             {
-                return !mMediaPlayFlag || (!mQueueVideoFrame.empty() && (!mMediaPauseFlag || (mSeekDuration >= 0) || (mSeekVideoFrameDuration >= 0)));
+                return !mMediaPlayFlag || !mPraseThreadFlag || (!mQueueVideoFrame.empty() && (!mMediaPauseFlag || (mSeekDuration >= 0)));
             });
             continue;
         }
 
+        VideoFrame frame;
         mQueueVideoFrame.wait_and_pop(frame);
 
         uint64_t currentTimeStamp = getCurrentMillisecond();
@@ -787,7 +794,7 @@ void WidgetPlayer::playAudioFrame()
         {
             mCvPlayMedia.wait(lockNextFrame, [this]
             {
-                return !mMediaPlayFlag || (!mQueueAudioFrame.empty() && (!mMediaPauseFlag || (mSeekDuration >= 0)));
+                return !mMediaPlayFlag || !mPraseThreadFlag || (!mQueueAudioFrame.empty() && (!mMediaPauseFlag || (mSeekDuration >= 0)));
             });
             continue;
         }
