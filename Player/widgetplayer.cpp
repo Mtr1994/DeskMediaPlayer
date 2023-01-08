@@ -42,6 +42,11 @@ void WidgetPlayer::init()
 
 void WidgetPlayer::play(const QString &path)
 {
+    if (!mPlayerValid)
+    {
+        emit AppSignal::getInstance()->sgl_system_output_message("播放器初始化失败");
+        return;
+    }
     // 正在播放该视频，就不用响应
     if (mMediaPlayFlag && (mMediaPath == path)) return;
 
@@ -185,6 +190,7 @@ void WidgetPlayer::initializeGL()
     if (!status)
     {
         qDebug() << "parse vertex shader fail " << mShaderProgram.log();
+        mPlayerValid = false;
         return;
     }
 
@@ -193,6 +199,7 @@ void WidgetPlayer::initializeGL()
     if (!status)
     {
         qDebug() << "parse fragment shader fail " << mShaderProgram.log();
+        mPlayerValid = false;
         return;
     }
 
@@ -201,6 +208,7 @@ void WidgetPlayer::initializeGL()
     if (!status)
     {
         qDebug() << "link shader fail " << mShaderProgram.log();
+        mPlayerValid = false;
         return;
     }
 
@@ -251,6 +259,7 @@ void WidgetPlayer::initializeGL()
         if (texture < 0)
         {
             qDebug() << "can not find uniform ourTexture";
+            mPlayerValid = false;
             return;
         }
         // 赋值为 0 是因为这里启用的纹理是 GL_TEXTURE0

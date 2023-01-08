@@ -44,6 +44,7 @@ SOURCES += \
     Public/appsignal.cpp \
     Widget/widgetmediacontrol.cpp \
     Widget/widgetmediapathlist.cpp \
+    Widget/widgetslider.cpp \
     main.cpp \
     mainwindow.cpp
 
@@ -59,6 +60,7 @@ HEADERS += \
     Public/threadsafequeue.h \
     Widget/widgetmediacontrol.h \
     Widget/widgetmediapathlist.h \
+    Widget/widgetslider.h \
     mainwindow.h
 
 FORMS += \

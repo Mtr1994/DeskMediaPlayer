@@ -79,6 +79,8 @@ private slots:
     void slot_thread_auto_play_current_media();
 
 private:
+    bool mPlayerValid = true;
+
     QOpenGLShaderProgram mShaderProgram;
 
     // 纹理对象
