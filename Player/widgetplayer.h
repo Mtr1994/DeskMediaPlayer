@@ -32,6 +32,9 @@ public:
     // 暂停播放
     void pause();
 
+    // 停止播放
+    void closeMedia();
+
     // 清理播放状态
     void clear();
 
@@ -102,9 +105,6 @@ private:
     // 当前视频帧数据
     VideoFrame mCurrentVideoFrame;
 
-    // 当前音频帧
-    AudioFrame mCurrentAudioFrame;
-
     int mAudioSampleSize = 0;
     int mSampleRate = 0;
     int mAudioChannles = 0;
@@ -132,6 +132,9 @@ private:
     qreal mAudioVolume = 0.36;
     QIODevice* mIODevice = nullptr;
 
+    // 解析锁
+    std::mutex mMutexParse;
+
     // 播放锁
     std::mutex mMutexPlayFrame;
 
@@ -157,9 +160,9 @@ private:
     QString mMediaPath;
 
     // 解析、播放视频、播放音频状态
-    volatile bool mPraseThreadFlag = false;
-    volatile bool mPlayVideoThreadFlag = false;
-    volatile bool mPlayAudioThreadFlag = false;
+    bool mPraseThreadFlag = false;
+    bool mPlayVideoThreadFlag = false;
+    bool mPlayAudioThreadFlag = false;
 
     // 是否需要截图
     bool mUserGrapImage = false;

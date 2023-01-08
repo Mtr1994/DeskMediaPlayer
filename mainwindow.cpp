@@ -5,11 +5,10 @@
 #include "Dialog/dialogversion.h"
 #include "Control/Message/messagewidget.h"
 
-#include <QScreen>
-#include <Windows.h>
 #include <QKeyEvent>
 #include <QFileDialog>
 #include <QStandardPaths>
+#include <QFontMetrics>
 
 MainWindow::MainWindow(QWidget *parent)
     : QMainWindow(parent)
@@ -30,20 +29,11 @@ MainWindow::~MainWindow()
 
 void MainWindow::init()
 {
-    QScreen *screen = QGuiApplication::screens().at(0);
-    float width = 1024;
-    float height = 640;
-
-    if (nullptr != screen)
-    {
-        QRect rect = screen->availableGeometry();
-        width = rect.width() * 0.64 < 1024 ? 1024 : rect.width() * 0.64;
-        height = rect.height() * 0.64 < 640 ? 640 : rect.height() * 0.64;
-    }
-
-    resize(width, height);
+    QFontMetrics fontMetrics(QFont("Microsoft YaHei", 9));
+    resize(fontMetrics.height() * 64, fontMetrics.height() * 64 * 0.618);
 
     connect(ui->actionOpen, &QAction::triggered, this, &MainWindow::slot_open_video_file);
+    connect(ui->actionClose, &QAction::triggered, this, &MainWindow::slot_close_video_file);
     connect(ui->actionQuit, &QAction::triggered, this, [this]{ this->close(); });
 
     connect(ui->actionSetting, &QAction::triggered, this, []{ /* 还没写，哈哈 */});
@@ -65,7 +55,7 @@ void MainWindow::init()
     connect(AppSignal::getInstance(), &AppSignal::sgl_thread_save_capture_status, this, &MainWindow::slot_thread_save_capture_status, Qt::QueuedConnection);
 
     // 默认测试播放
-    //ui->widgetOpenGLPlayer->play(SoftConfig::getInstance()->getValue("Media", "path"));
+    // emit AppSignal::getInstance()->sgl_start_play_target_media("http://101.34.253.220/image/upload/video/Demo.mp4");
 }
 
 void MainWindow::slot_start_play_video()
@@ -106,6 +96,12 @@ void MainWindow::slot_open_video_file()
     }
 
     emit AppSignal::getInstance()->sgl_start_play_target_media(fileNameList.first());
+}
+
+void MainWindow::slot_close_video_file()
+{
+    setWindowTitle("Mtr1994");
+    ui->widgetOpenGLPlayer->closeMedia();
 }
 
 void MainWindow::slot_media_show_full_screen()

@@ -28,7 +28,6 @@ WidgetPlayer::~WidgetPlayer()
 void WidgetPlayer::init()
 {
     mCurrentVideoFrame.linesize = 0;
-    mCurrentAudioFrame.pts = -1;
 
     connect(this, &WidgetPlayer::sgl_thread_auto_play_current_media, this, &WidgetPlayer::slot_thread_auto_play_current_media, Qt::QueuedConnection);
 
@@ -83,6 +82,14 @@ void WidgetPlayer::pause()
     mMediaPauseFlag = true;
 }
 
+void WidgetPlayer::closeMedia()
+{
+    mMediaPlayFlag = false;
+
+    mCvParse.notify_one();
+    mCvPlayMedia.notify_all();
+}
+
 void WidgetPlayer::clear()
 {
     qDebug() << "WidgetPlayer::clear";
@@ -103,6 +110,11 @@ void WidgetPlayer::clear()
     mAudioSampleSize = 0;
     mSampleRate = 0;
     mAudioChannles = 0;
+
+    mUserGrapImage = false;
+    mPraseThreadFlag = false;
+    mPlayVideoThreadFlag = false;
+    mPlayAudioThreadFlag = false;
 
     // 不能清理这个值
     // mAutoPlayMedia = false;
@@ -141,7 +153,11 @@ void WidgetPlayer::setAudioVolume(qreal volume)
 
 void WidgetPlayer::seek(int position)
 {
+    // Seek 的时候，不能继续解析，要让播放线程先清理旧的帧
+    std::unique_lock<std::mutex> lock(mMutexParse);
     mArriveTargetFrame = false;
+    mSeekVideoFrameDuration = 0x0fffffffffffffff;
+    mSeekAudioFrameDuration = 0x0fffffffffffffff;
     //qDebug() << "seek 1" << position;
     mSeekDuration = position + mBeginVideoTimeStamp;
     //qDebug() << "seek 2" << mSeekDuration;
@@ -162,7 +178,7 @@ void WidgetPlayer::initializeGL()
     // 开启多重采样
     glEnable(GL_MULTISAMPLE);
 
-    // 着色器文件不能使用 UTF-8-BOM 编码，会报错，只能采用 UTF-8 编码qter
+    // 着色器文件不能使用 UTF-8-BOM 编码，会报错，只能采用 UTF-8 编码
 
     // 加载顶点着色器
     bool status = mShaderProgram.addShaderFromSourceFile(QOpenGLShader::Vertex, ":/Resource/shader/shader.vert");
@@ -448,11 +464,9 @@ void WidgetPlayer::parse(const QString &path)
     bool seekVideoFlag = false;
     bool seekAudioFlag = false;
 
-    std::mutex mutexParse;
-
     while (mMediaPlayFlag)
     {
-        std::unique_lock<std::mutex> lock(mutexParse);
+        std::unique_lock<std::mutex> lock(mMutexParse);
         mCvParse.wait(lock, [this]{ return !mMediaPlayFlag || mQueueVideoFrame.size() < 10; });
 
         if (mSeekDuration >= 0)
@@ -760,15 +774,16 @@ void WidgetPlayer::playAudioFrame()
         // 解析结束且视频帧为空的时候，关闭播放线程
         if (!mPraseThreadFlag && mQueueAudioFrame.empty()) break;
 
-        AudioFrame frame;
-        if (mMediaPlayFlag && (mQueueAudioFrame.empty() || (mMediaPauseFlag && (mSeekDuration < 0) && (mSeekAudioFrameDuration < 0) )))
+        if (mMediaPlayFlag && (mQueueAudioFrame.empty() || (mMediaPauseFlag && (mSeekDuration < 0))))
         {
             mCvPlayMedia.wait(lockNextFrame, [this]
             {
-                return !mMediaPlayFlag || (!mQueueAudioFrame.empty() && (!mMediaPauseFlag || (mSeekDuration >= 0) || (mSeekAudioFrameDuration >= 0)));
+                return !mMediaPlayFlag || (!mQueueAudioFrame.empty() && (!mMediaPauseFlag || (mSeekDuration >= 0)));
             });
             continue;
         }
+
+        AudioFrame frame;
         mQueueAudioFrame.wait_and_pop(frame);
 
         uint64_t currentTimeStamp = getCurrentMillisecond();
@@ -782,27 +797,15 @@ void WidgetPlayer::playAudioFrame()
             mCvPlayMedia.wait_for(lockNextFrame, std::chrono::milliseconds(milliseconds));
             continue;
         }
-
-        if (mSeekAudioFrameDuration == frame.pts)
-        {
-            mSeekAudioFrameDuration = -1;
-        }
-
         mQueueAudioFrame.wait_and_pop();
 
-        if (mCurrentAudioFrame.pts > 0)
-        {
-            delete[] mCurrentAudioFrame.data;
-            mCurrentAudioFrame.data = nullptr;
-            mCurrentAudioFrame.pts = -1;
-        }
-
-        mCurrentAudioFrame = frame;
+        if (mSeekAudioFrameDuration == frame.pts) mSeekAudioFrameDuration = -1;
 
         if (nullptr == frame.data) continue;
         if (nullptr != mIODevice && mAudioVolume > 0)
         {
-            mIODevice->write((const char*)frame.data, frame.size);
+            if (!mMediaPauseFlag && mSeekAudioFrameDuration < 0) mIODevice->write((const char*)frame.data, frame.size);
+            delete frame.data;
         }
     }
 

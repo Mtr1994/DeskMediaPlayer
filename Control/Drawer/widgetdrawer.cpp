@@ -99,7 +99,7 @@ void WidgetDrawer::init()
 
     // 标题
     mTitleWidget = new QWidget(mContentWidget);
-    mTitleWidget->setGeometry(0, 0, mContentWidget->width(), fontRect.height() * 3);
+    mTitleWidget->setGeometry(0, 0, mContentWidget->width(), fontRect.height() * 2.4);
     mTitleWidget->setObjectName("titleWidget");
     mTitleWidget->setStyleSheet("QWidget#titleWidget{ background-color: #fefefe; border: none; border-bottom: 1px solid #e8e8e8; border-top: 1px solid #e8e8e8}");
 
