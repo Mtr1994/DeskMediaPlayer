@@ -131,6 +131,8 @@ void MainWindow::slot_system_output_message(const QString &message)
 
 void MainWindow::slot_start_play_target_media(const QString &path)
 {
+    // 标题栏现实视频的路径信息
+    setWindowTitle(QString("Mtr1994  -  %1").arg(path));
     ui->widgetOpenGLPlayer->play(path);
 }
 
