@@ -25,7 +25,6 @@ private:
 
 private:
     bool mMousePressFlag = false;
-    uint16_t mGrooveMargin = 0;
 };
 
 #endif // WIDGETSLIDER_H

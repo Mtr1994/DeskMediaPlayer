@@ -1,9 +1,6 @@
 #include "widgetslider.h"
 
-// Qdebug
-#include <QDebug>
 #include <QMouseEvent>
-#include <QFontMetrics>
 
 WidgetSlider::WidgetSlider(QWidget *parent)
     : QSlider{parent}
@@ -14,12 +11,6 @@ WidgetSlider::WidgetSlider(QWidget *parent)
 void WidgetSlider::init()
 {
     setOrientation(Qt::Horizontal);
-    setRange(0, 100);
-
-    QFontMetrics metrics(QFont("Microsoft YaHei", 9));
-    mGrooveMargin = 2;
-
-    qDebug() << "mGrooveMargin ";
 }
 
 void WidgetSlider::mousePressEvent(QMouseEvent *event)
