@@ -164,7 +164,7 @@ void WidgetPlayer::seek(int position)
     mSeekVideoFrameDuration = 0x0fffffffffffffff;
     mSeekAudioFrameDuration = 0x0fffffffffffffff;
     //qDebug() << "seek 1" << position;
-    mSeekDuration = position + mBeginVideoTimeStamp;
+    mSeekDuration = position;
     //qDebug() << "seek 2" << mSeekDuration;
     mCvPlayMedia.notify_all();
 }
@@ -485,7 +485,7 @@ void WidgetPlayer::parse(const QString &path)
             if (nullptr != codeCtxAudio) avcodec_flush_buffers(codeCtxAudio);
             avformat_flush(formatCtx);
 
-            int ret = av_seek_frame(formatCtx, videoStreamIndex, mSeekDuration, mSeekDuration <= mCurrentVideoFrame.pts ? AVSEEK_FLAG_BACKWARD : AVSEEK_FLAG_FRAME);
+            int ret = av_seek_frame(formatCtx, -1, mSeekDuration * AV_TIME_BASE, AVSEEK_FLAG_BACKWARD);
             if (ret >= 0)
             {
                 mSeekDuration = -1;

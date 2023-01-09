@@ -42,9 +42,9 @@ void WidgetMediaControl::init()
     // 读取音量配置
     ui->sliderVolume->setValue(SoftConfig::getInstance()->getValue("Volume", "value").toUInt());
 
-    connect(ui->slider, &WidgetSlider::sgl_current_value_changed, this, [](int value)
+    connect(ui->slider, &WidgetSlider::sgl_current_value_changed, this, [this](int value)
     {
-        emit AppSignal::getInstance()->sgl_seek_video_position(value);
+        emit AppSignal::getInstance()->sgl_seek_video_position(value * mMediaTimeBase);
     });
 
     connect(AppSignal::getInstance(), &AppSignal::sgl_init_media_duration, this, &WidgetMediaControl::slot_init_media_duration);
