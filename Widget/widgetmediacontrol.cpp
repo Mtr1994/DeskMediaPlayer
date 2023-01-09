@@ -67,10 +67,10 @@ void WidgetMediaControl::addMediaPath(const QString &path)
 
 void WidgetMediaControl::slot_btn_play_previous_frame()
 {
-    int targetPosition = ui->slider->value() - 5.0 / mMediaTimeBase;
+    int targetPosition = ui->slider->value() - 10.0 / mMediaTimeBase;
     if (targetPosition <= 0) targetPosition = 0;
 
-    emit AppSignal::getInstance()->sgl_seek_video_position(targetPosition);
+    emit AppSignal::getInstance()->sgl_seek_video_position(targetPosition * mMediaTimeBase);
 }
 
 void WidgetMediaControl::slot_btn_play_click()
@@ -87,9 +87,9 @@ void WidgetMediaControl::slot_btn_play_click()
 
 void WidgetMediaControl::slot_btn_play_next_frame()
 {
-    int targetPosition = ui->slider->value() + 5.0 / mMediaTimeBase;
+    int targetPosition = ui->slider->value() + 10.0 / mMediaTimeBase;
     if (targetPosition >= ui->slider->maximum()) targetPosition = ui->slider->maximum();
-    emit AppSignal::getInstance()->sgl_seek_video_position(targetPosition);
+    emit AppSignal::getInstance()->sgl_seek_video_position(targetPosition * mMediaTimeBase);
 }
 
 void WidgetMediaControl::slot_volume_value_change(int volume)
