@@ -292,9 +292,6 @@
           <property name="text">
            <string/>
           </property>
-          <property name="MediaTool" stdset="0">
-           <bool>true</bool>
-          </property>
          </widget>
         </item>
         <item>

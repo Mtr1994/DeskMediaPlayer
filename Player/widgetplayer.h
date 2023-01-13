@@ -16,6 +16,7 @@ class WidgetPlayer : public QOpenGLWidget, protected QOpenGLFunctions_3_3_Core
 {
     Q_OBJECT
 public:
+    enum class PlayerStatus { STATUS_PLAYING  = 1, STATUS_PAUSE, STATUS_CLOSED, STATUS_SEEK };
     explicit WidgetPlayer(QWidget *parent = nullptr);
     ~WidgetPlayer();
 
@@ -42,7 +43,7 @@ public:
     void setAudioVolume(qreal volume);
 
     // 视频跳转
-    void seek(int position);
+    void seek(double position);
 
     // 截图
     void grapImage();
@@ -79,8 +80,7 @@ private slots:
     void slot_thread_auto_play_current_media();
 
 private:
-    bool mPlayerValid = true;
-
+    // 纹理着色器
     QOpenGLShaderProgram mShaderProgram;
 
     // 纹理对象
@@ -91,6 +91,9 @@ private:
 
     // 纹理高度
     int mTextureHeight = 0;
+
+    // 播放器初始化状态
+    bool mPlayerInitializeStatus = true;
 
     // 视频帧队列
     ThreadSafeQueue<VideoFrame> mQueueVideoFrame;
@@ -112,7 +115,7 @@ private:
     int mAudioChannles = 0;
 
     // 视频跳转位置
-    int64_t mSeekDuration = -1;
+    double mSeekDuration = -1;
 
     // 是否已经播放到索引帧
     bool mArriveTargetFrame = true;
@@ -122,13 +125,16 @@ private:
     int64_t mSeekAudioFrameDuration = -1;
 
     // 视频开始播放的时间戳
-    int64_t mStartTimeStamp = 0;
+    int64_t mStartVideoTimeStamp = -1;
+
+    // 音频开始播放的时间戳
+    int64_t mStartAudioTimeStamp = -1;
 
     // 视频第一帧的时间戳
-    int64_t mBeginVideoTimeStamp = -1;
+    int64_t mBeginVideoPTS = -1;
 
     // 音频第一帧的时间戳
-    int64_t mBeginAudioTimeStamp = -1;
+    int64_t mBeginAudioPTS = -1;
 
     QAudioOutput* mAudioOutput = nullptr;
     qreal mAudioVolume = 0.36;
@@ -153,13 +159,16 @@ private:
     std::condition_variable mCvCloseMedia;
 
     // 播放器状态
-    bool mMediaPlayFlag = false;
+    PlayerStatus mMediaPlayerStatus = PlayerStatus::STATUS_CLOSED;
 
-    // 播放状态
-    bool mMediaPauseFlag = false;
+//    // 播放状态
+//    bool mMediaPauseFlag = false;
 
-    // 当前视频路径
-    QString mMediaPath;
+    // 当前播放的视频路径
+    QString mCurrentMediaPath;
+
+    // 下一个需要播放的视频路径
+    QString mNextMediaPath;
 
     // 解析、播放视频、播放音频状态
     bool mPraseThreadFlag = false;
@@ -168,9 +177,6 @@ private:
 
     // 是否需要截图
     bool mUserGrapImage = false;
-
-    // 是否需要自动开始播放当前 mMediaPath 代表的视频
-    bool mAutoPlayMedia = false;
 };
 
 #endif // WIDGETPLAYER_H

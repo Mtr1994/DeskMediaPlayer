@@ -17,6 +17,7 @@ void WidgetSlider::mousePressEvent(QMouseEvent *event)
 {
     Q_UNUSED(event);
     mMousePressFlag = true;
+    emit QSlider::sliderPressed();
 }
 
 void WidgetSlider::mouseMoveEvent(QMouseEvent *event)
@@ -29,6 +30,7 @@ void WidgetSlider::mouseReleaseEvent(QMouseEvent *event)
 {
     mMousePressFlag = false;
     setNewValue(event);
+    emit QSlider::sliderReleased();
 }
 
 void WidgetSlider::setNewValue(QMouseEvent *event)

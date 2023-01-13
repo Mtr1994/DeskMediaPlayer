@@ -42,6 +42,9 @@ void WidgetMediaControl::init()
     // 读取音量配置
     ui->sliderVolume->setValue(SoftConfig::getInstance()->getValue("Volume", "value").toUInt());
 
+    connect(ui->slider, &WidgetSlider::sliderPressed, this, [this]{ mSliderPressed = true; });
+    connect(ui->slider, &WidgetSlider::sliderReleased, this, [this]{ mSliderPressed = false; });
+
     connect(ui->slider, &WidgetSlider::sgl_current_value_changed, this, [this](int value)
     {
         emit AppSignal::getInstance()->sgl_seek_video_position(value * mMediaTimeBase);
@@ -67,7 +70,7 @@ void WidgetMediaControl::addMediaPath(const QString &path)
 
 void WidgetMediaControl::slot_btn_play_previous_frame()
 {
-    int targetPosition = ui->slider->value() - 10.0 / mMediaTimeBase;
+    double targetPosition = ui->slider->value() - 5.0 / mMediaTimeBase;
     if (targetPosition <= 0) targetPosition = 0;
 
     emit AppSignal::getInstance()->sgl_seek_video_position(targetPosition * mMediaTimeBase);
@@ -87,7 +90,7 @@ void WidgetMediaControl::slot_btn_play_click()
 
 void WidgetMediaControl::slot_btn_play_next_frame()
 {
-    int targetPosition = ui->slider->value() + 10.0 / mMediaTimeBase;
+    double targetPosition = ui->slider->value() + 5.0 / mMediaTimeBase;
     if (targetPosition >= ui->slider->maximum()) targetPosition = ui->slider->maximum();
     emit AppSignal::getInstance()->sgl_seek_video_position(targetPosition * mMediaTimeBase);
 }
@@ -123,10 +126,7 @@ void WidgetMediaControl::slot_thread_current_video_frame_time(int64_t pts, float
 {
     if (mMediaBaseDuration < 0) return;
 
-    if (!ui->slider->isSliderDown())
-    {
-        ui->slider->setValue(pts / mMediaTimeBase * timebase);
-    }
+    if (!mSliderPressed) ui->slider->setValue(pts / mMediaTimeBase * timebase);
 
     uint32_t time = pts * timebase;
     ui->lbDuration->setText(QString("%1:%2:%3").arg(uint32_t(time) / 3600, 2, 10, QLatin1Char('0')).arg(uint32_t(time) % 3600 / 60, 2, 10, QLatin1Char('0')).arg(uint32_t(time) % 60, 2, 10, QLatin1Char('0')));

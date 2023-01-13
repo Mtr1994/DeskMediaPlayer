@@ -54,6 +54,9 @@ private:
 
     // 当前播放地址
     QString mCurrentMediaPath;
+
+    // 是否按下滚动条
+    bool mSliderPressed = false;
 };
 
 #endif // WIDGETMEDIACONTROL_H

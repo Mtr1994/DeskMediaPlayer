@@ -42,31 +42,41 @@ void WidgetPlayer::init()
 
 void WidgetPlayer::play(const QString &path)
 {
-    if (!mPlayerValid)
+    if (!mPlayerInitializeStatus)
     {
         emit AppSignal::getInstance()->sgl_system_output_message("播放器初始化失败");
         return;
     }
     // 正在播放该视频，就不用响应
-    if (mMediaPlayFlag && (mMediaPath == path)) return;
+    if ((mMediaPlayerStatus != PlayerStatus::STATUS_CLOSED) && (mCurrentMediaPath == path)) return;
 
-    mMediaPath = path;
-    if (mMediaPlayFlag)
+    if (mMediaPlayerStatus != PlayerStatus::STATUS_CLOSED)
     {
         qDebug() << "------------------------------------------------------------ 中途加入视频要开始了 ------------------------------------------------------------";
-        mAutoPlayMedia = true;
-        mMediaPlayFlag = false;
 
+        // 记录下一个需要播放的视频路径
+        mNextMediaPath = path;
+
+        //mAutoPlayMedia = true;
+        mMediaPlayerStatus = PlayerStatus::STATUS_CLOSED;
+
+        // 唤醒 解析线程
         mCvParse.notify_one();
+
+        // 唤醒 播放线程
         mCvPlayMedia.notify_all();
     }
     else
     {
-        if (mMediaPath.isEmpty()) return;
+         // 记录当前视频的路径
+        mCurrentMediaPath = path;
+
+        if (mCurrentMediaPath.isEmpty()) return;
 
         qDebug() << "------------------------------------------------------------ 自然加入视频要开始了 ------------------------------------------------------------";
 
-        mMediaPlayFlag = true;
+        // 修改播放器状态
+        mMediaPlayerStatus = PlayerStatus::STATUS_PLAYING;
 
         auto funcParse = std::bind(&WidgetPlayer::parse, this, std::placeholders::_1);
         std::thread threadParse(funcParse, path);
@@ -76,37 +86,45 @@ void WidgetPlayer::play(const QString &path)
 
 void WidgetPlayer::start()
 {
-    mMediaPauseFlag = false;
-    mStartTimeStamp = 0;
+    // 修改播放状态为正在播放
+    mMediaPlayerStatus = PlayerStatus::STATUS_PLAYING;
 
+    // 重新计算视频开始播放时间
+    mStartVideoTimeStamp = -1;
+
+    // 重新计算音频开始播放时间
+    mStartAudioTimeStamp = -1;
+
+    // 唤醒播放线程，通过该消费者取唤醒生产者
     mCvPlayMedia.notify_all();
 }
 
 void WidgetPlayer::pause()
 {
-    mMediaPauseFlag = true;
+    mMediaPlayerStatus = PlayerStatus::STATUS_PAUSE;
 }
 
 void WidgetPlayer::closeMedia()
 {
-    mMediaPlayFlag = false;
+    mMediaPlayerStatus = PlayerStatus::STATUS_CLOSED;
 
     mCvParse.notify_one();
+
     mCvPlayMedia.notify_all();
 }
 
 void WidgetPlayer::clear()
 {
     qDebug() << "WidgetPlayer::clear";
-    mMediaPlayFlag = false;
-    mMediaPauseFlag = false;
+    mMediaPlayerStatus = PlayerStatus::STATUS_CLOSED;
     mArriveTargetFrame = true;
     mSeekDuration = -1;
     mSeekVideoFrameDuration = -1;
     mSeekAudioFrameDuration = -1;
-    mStartTimeStamp = 0;
-    mBeginVideoTimeStamp = -1;
-    mBeginAudioTimeStamp = -1;
+    mStartVideoTimeStamp = -1;
+    mStartAudioTimeStamp = -1;
+    mBeginVideoPTS = -1;
+    mBeginAudioPTS = -1;
 
     mTextureID = -1;
     mTextureWidth = 0;
@@ -156,16 +174,17 @@ void WidgetPlayer::setAudioVolume(qreal volume)
     mAudioOutput->setVolume(mAudioVolume);
 }
 
-void WidgetPlayer::seek(int position)
+void WidgetPlayer::seek(double position)
 {
     // Seek 的时候，不能继续解析，要让播放线程先清理旧的帧
     std::unique_lock<std::mutex> lock(mMutexParse);
     mArriveTargetFrame = false;
     mSeekVideoFrameDuration = 0x0fffffffffffffff;
     mSeekAudioFrameDuration = 0x0fffffffffffffff;
-    //qDebug() << "seek 1" << position;
+
+    mMediaPlayerStatus = PlayerStatus::STATUS_SEEK;
+    //qDebug() << "seek A" << position;
     mSeekDuration = position;
-    //qDebug() << "seek 2" << mSeekDuration;
     mCvPlayMedia.notify_all();
 }
 
@@ -190,7 +209,7 @@ void WidgetPlayer::initializeGL()
     if (!status)
     {
         qDebug() << "parse vertex shader fail " << mShaderProgram.log();
-        mPlayerValid = false;
+        mPlayerInitializeStatus = false;
         return;
     }
 
@@ -199,7 +218,7 @@ void WidgetPlayer::initializeGL()
     if (!status)
     {
         qDebug() << "parse fragment shader fail " << mShaderProgram.log();
-        mPlayerValid = false;
+        mPlayerInitializeStatus = false;
         return;
     }
 
@@ -208,7 +227,7 @@ void WidgetPlayer::initializeGL()
     if (!status)
     {
         qDebug() << "link shader fail " << mShaderProgram.log();
-        mPlayerValid = false;
+        mPlayerInitializeStatus = false;
         return;
     }
 
@@ -259,7 +278,7 @@ void WidgetPlayer::initializeGL()
         if (texture < 0)
         {
             qDebug() << "can not find uniform ourTexture";
-            mPlayerValid = false;
+            mPlayerInitializeStatus = false;
             return;
         }
         // 赋值为 0 是因为这里启用的纹理是 GL_TEXTURE0
@@ -285,7 +304,7 @@ void WidgetPlayer::paintGL()
 {
     glViewport((width() - mTextureWidth) / 2.0, (height() - mTextureHeight) / 2.0, mTextureWidth, mTextureHeight);
 
-    if (!mMediaPlayFlag)
+    if (mMediaPlayerStatus == PlayerStatus::STATUS_CLOSED)
     {
         glBindTexture(GL_TEXTURE_2D, mTextureID);
         glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
@@ -411,7 +430,7 @@ void WidgetPlayer::parse(const QString &path)
             }
 
             int32_t duration = formatCtx->streams[i]->duration;
-            timebase = (double)codeCtxVideo->pkt_timebase.num / codeCtxVideo->pkt_timebase.den;
+            timebase = (double)formatCtx->streams[i]->time_base.num / formatCtx->streams[i]->time_base.den;
             if (duration == 0)
             {
                duration = formatCtx->duration;
@@ -473,30 +492,67 @@ void WidgetPlayer::parse(const QString &path)
     bool seekVideoFlag = false;
     bool seekAudioFlag = false;
 
-    while (mMediaPlayFlag)
+    // 解析之前，记录第一帧的 PTS
+    mBeginVideoPTS = AV_NOPTS_VALUE;
+    mBeginAudioPTS = AV_NOPTS_VALUE;
+
+    // 解析到了哪个帧
+    double mLastParseDuration = -1;
+
+    qDebug() << "timebase " << timebase;
+
+    while (mMediaPlayerStatus != PlayerStatus::STATUS_CLOSED)
     {
         std::unique_lock<std::mutex> lock(mMutexParse);
-        mCvParse.wait(lock, [this]{ return !mMediaPlayFlag || mQueueVideoFrame.size() < 10; });
+        mCvParse.wait(lock, [this]
+        {
+            // 除了等待状态，其他状态都要过
+            bool flag1 = mMediaPlayerStatus != PlayerStatus::STATUS_PAUSE;
 
-        if (mSeekDuration >= 0)
+            // 限制队列里面帧的个数，太多了会占内存
+            bool flag2 = mQueueVideoFrame.size() < 3;
+
+            // 关闭状态
+            bool flag3 = mMediaPlayerStatus == PlayerStatus::STATUS_CLOSED;
+
+            // 跳转状态
+            bool flag4 = mMediaPlayerStatus == PlayerStatus::STATUS_SEEK;
+
+            return (flag1 && flag2) || flag3 || flag4;
+        });
+
+        // 如果是 停止 状态，直接退出
+        if (mMediaPlayerStatus == PlayerStatus::STATUS_CLOSED) break;
+
+        if (mMediaPlayerStatus == PlayerStatus::STATUS_SEEK)
         {
             // 清空已经读取的帧数据
             if (nullptr != codeCtxVideo) avcodec_flush_buffers(codeCtxVideo);
             if (nullptr != codeCtxAudio) avcodec_flush_buffers(codeCtxAudio);
             avformat_flush(formatCtx);
 
-            int ret = av_seek_frame(formatCtx, -1, mSeekDuration * AV_TIME_BASE, AVSEEK_FLAG_BACKWARD);
+            double position = mSeekDuration + mBeginVideoPTS * timebase;
+
+            // 823718880
+            //qDebug() << "position " << position << " " << mBeginVideoPTS << " " << mCurrentVideoFrame.timebase << " " << AV_TIME_BASE << " " << mLastParseDuration;
+
+            //qDebug() << "timestamp " << QString::number(position * AV_TIME_BASE, 'f', 2);
+
+            int flags = position > mLastParseDuration ? AVSEEK_FLAG_FRAME : AVSEEK_FLAG_BACKWARD;
+            int ret = av_seek_frame(formatCtx, -1, position * AV_TIME_BASE, flags);
             if (ret >= 0)
             {
                 mSeekDuration = -1;
                 seekVideoFlag = true;
                 seekAudioFlag = true;
+                mMediaPlayerStatus = PlayerStatus::STATUS_PLAYING;
             }
             else
             {
                 mArriveTargetFrame = true;
                 mSeekDuration = -1;
                 qDebug() << "seek video failed";
+                mMediaPlayerStatus = PlayerStatus::STATUS_CLOSED;
                 continue;
             }
         }
@@ -535,14 +591,15 @@ void WidgetPlayer::parse(const QString &path)
                 frame->pts = frame->best_effort_timestamp;
 
                 if (frame->pts == AV_NOPTS_VALUE) frame->pts = frame->pkt_dts = 1;
-
-                if (mBeginVideoTimeStamp == -1) mBeginVideoTimeStamp = frame->pts;
+                if (mBeginVideoPTS == AV_NOPTS_VALUE) mBeginVideoPTS = frame->pts;
 
                 // 记录跳转位置
                 if (seekVideoFlag)
                 {
-                    mSeekVideoFrameDuration = frame->pts - mBeginVideoTimeStamp;
+                    mSeekVideoFrameDuration = frame->pts - mBeginVideoPTS;
                     seekVideoFlag = false;
+
+                    //qDebug() << "seekVideoFlag " << frame->pts;
                 }
 
                 if (nullptr == pSwsCtx)
@@ -557,7 +614,7 @@ void WidgetPlayer::parse(const QString &path)
                 uint8_t *buffer = new uint8_t[linesize0 * pixHeight * 3];
                 memset(buffer, 0, linesize0 * pixHeight * 3);
 
-                VideoFrame videoFrame = { frame->pts - mBeginVideoTimeStamp, pixWidth, pixHeight, mAudioSampleSize, 0, buffer, 0 };
+                VideoFrame videoFrame = { frame->pts - mBeginVideoPTS, pixWidth, pixHeight, mAudioSampleSize, 0, buffer, 0 };
                 if (frame->format == AV_PIX_FMT_RGB24)
                 {
                     memcpy(buffer, frame->data[0], linesize0 * pixHeight * 3);
@@ -571,6 +628,8 @@ void WidgetPlayer::parse(const QString &path)
                     if (ret <= 0)  memset(buffer, 0, linesize0 * pixHeight * 3);
                     videoFrame.timebase = (double)codeCtxVideo->pkt_timebase.num / codeCtxVideo->pkt_timebase.den;
                 }
+
+                mLastParseDuration = (frame->pts - mBeginVideoPTS) * videoFrame.timebase;
 
                 videoFrame.linesize = linesize0;
                 mQueueVideoFrame.push(videoFrame);
@@ -608,15 +667,18 @@ void WidgetPlayer::parse(const QString &path)
                 }
 
                 frame->pts = frame->best_effort_timestamp;
-                if (frame->pts == AV_NOPTS_VALUE) frame->pts = frame->pkt_dts = 0;
 
-                if (mBeginAudioTimeStamp == -1) mBeginAudioTimeStamp = frame->pts;
+                bool invalidPTS = frame->pts == AV_NOPTS_VALUE;
+                if (invalidPTS) frame->pts = frame->pkt_dts = 0;
+
+                if (mBeginAudioPTS == AV_NOPTS_VALUE) mBeginAudioPTS = frame->pts;
 
                 // 记录跳转位置
-                if (seekAudioFlag)
+                if (seekAudioFlag && !invalidPTS)
                 {
-                    mSeekAudioFrameDuration = frame->pts - mBeginAudioTimeStamp;
+                    mSeekAudioFrameDuration = frame->pts - mBeginAudioPTS;
                     seekAudioFlag = false;
+                    //qDebug() << "seekAudioFlag " << frame->pts;
                 }
 
                 swrCtx = swr_alloc_set_opts(nullptr, frame->channel_layout, AV_SAMPLE_FMT_S16, codeCtxAudio->sample_rate, codeCtxAudio->channel_layout, codeCtxAudio->sample_fmt, codeCtxAudio->sample_rate, 0, nullptr);
@@ -631,7 +693,7 @@ void WidgetPlayer::parse(const QString &path)
                     break;
                 }
 
-                AudioFrame audio = { frame->pts - mBeginAudioTimeStamp, bufsize, 0, buf };
+                AudioFrame audio = { frame->pts - mBeginAudioPTS, bufsize, 0, buf };
                 audio.timebase = (double)codeCtxAudio->pkt_timebase.num / codeCtxAudio->pkt_timebase.den;
                 mQueueAudioFrame.push(audio);
 
@@ -696,30 +758,49 @@ void WidgetPlayer::playVideoFrame()
     mPlayVideoThreadFlag = true;
 
     std::unique_lock<std::mutex> lockNextFrame(mMutexWaitVideoFrame);
-    while (mMediaPlayFlag)
+    while (mMediaPlayerStatus != PlayerStatus::STATUS_CLOSED)
     {
         // 解析结束且视频帧为空的时候，关闭播放线程
         if (!mPraseThreadFlag && mQueueVideoFrame.empty()) break;
 
-        if (mMediaPlayFlag && (mQueueVideoFrame.empty() || (mMediaPauseFlag && (mSeekDuration < 0))))
+        // 通知准备解析下一帧数据帧
+        if (mPraseThreadFlag) mCvParse.notify_one();
+
+        // 防止循环空转
+        mCvPlayMedia.wait(lockNextFrame, [this]
         {
-            mCvPlayMedia.wait(lockNextFrame, [this]
-            {
-                return !mMediaPlayFlag || !mPraseThreadFlag || (!mQueueVideoFrame.empty() && (!mMediaPauseFlag || (mSeekDuration >= 0)));
-            });
-            continue;
-        }
+            // 不是 暂停 状态
+            bool flag1 = mMediaPlayerStatus != PlayerStatus::STATUS_PAUSE;
+
+            // 视频队列非空
+            bool flag2 = !mQueueVideoFrame.empty();
+
+            // 处于 关闭 状态
+            bool flag3 = mMediaPlayerStatus == PlayerStatus::STATUS_CLOSED;
+
+            // 处于 跳转 状态
+            bool flag4 = mMediaPlayerStatus == PlayerStatus::STATUS_SEEK;
+
+         //   qDebug() << "video falgs " << flag1 << " " << flag2 << " " << flag3;
+
+            return (flag1 && flag2) || flag3 || flag4;
+        });
+
+        if (mMediaPlayerStatus == PlayerStatus::STATUS_CLOSED) break;
 
         VideoFrame frame;
         mQueueVideoFrame.wait_and_pop(frame);
 
+       // qDebug() << "frame " << frame.pts << " " << mSeekVideoFrameDuration;;
+
         uint64_t currentTimeStamp = getCurrentMillisecond();
         uint64_t time = frame.pts * frame.timebase * 1000;
 
-        if (mStartTimeStamp == 0) mStartTimeStamp = currentTimeStamp - time;
-        if ((mSeekVideoFrameDuration < 0) && ((currentTimeStamp - mStartTimeStamp) < time))
+        if ((mStartVideoTimeStamp < 0) && (frame.pts > 0)) mStartVideoTimeStamp = currentTimeStamp - time;
+        if ((mSeekVideoFrameDuration < 0) && ((currentTimeStamp - mStartVideoTimeStamp) < time))
         {
-            uint32_t milliseconds = time - (currentTimeStamp - mStartTimeStamp);
+            uint32_t milliseconds = time - (currentTimeStamp - mStartVideoTimeStamp);
+            //qDebug() << "video wait " << milliseconds;
             mCvPlayMedia.wait_for(lockNextFrame, std::chrono::milliseconds(milliseconds));
             continue;
         }
@@ -737,7 +818,7 @@ void WidgetPlayer::playVideoFrame()
         if (mSeekVideoFrameDuration == frame.pts)
         {
             mSeekVideoFrameDuration = -1;
-            mStartTimeStamp = 0;
+            mStartVideoTimeStamp = -1;
             mArriveTargetFrame = true;
         }
 
@@ -746,9 +827,6 @@ void WidgetPlayer::playVideoFrame()
         {
             emit AppSignal::getInstance()->sgl_thread_current_video_frame_time(frame.pts, frame.timebase);
         }
-
-        // 通知准备解析数据帧
-        mCvParse.notify_one();
     }
 
     mPlayVideoThreadFlag = false;
@@ -785,42 +863,59 @@ void WidgetPlayer::playAudioFrame()
     std::unique_lock<std::mutex> lockNextFrame(mMutexWaitAudioFrame);
 
     // 提取音频帧
-    while (mMediaPlayFlag)
+    while (mMediaPlayerStatus != PlayerStatus::STATUS_CLOSED)
     {
         // 解析结束且视频帧为空的时候，关闭播放线程
         if (!mPraseThreadFlag && mQueueAudioFrame.empty()) break;
 
-        if (mMediaPlayFlag && (mQueueAudioFrame.empty() || (mMediaPauseFlag && (mSeekDuration < 0))))
+        // 通知准备解析下一帧数据帧
+        if (mPraseThreadFlag) mCvParse.notify_one();
+
+        mCvPlayMedia.wait(lockNextFrame, [this]
         {
-            mCvPlayMedia.wait(lockNextFrame, [this]
-            {
-                return !mMediaPlayFlag || !mPraseThreadFlag || (!mQueueAudioFrame.empty() && (!mMediaPauseFlag || (mSeekDuration >= 0)));
-            });
-            continue;
-        }
+            // 不是 暂停 状态
+            bool flag1 = mMediaPlayerStatus != PlayerStatus::STATUS_PAUSE;
+
+            // 音频队列非空
+            bool flag2 = !mQueueAudioFrame.empty();
+
+            // 处于 关闭 状态
+            bool flag3 = mMediaPlayerStatus == PlayerStatus::STATUS_CLOSED;
+
+            // 处于 跳转 状态
+            bool flag4 = mMediaPlayerStatus == PlayerStatus::STATUS_SEEK;
+
+            return (flag1 && flag2) || flag3 || flag4;
+        });
+
+        if (mMediaPlayerStatus == PlayerStatus::STATUS_CLOSED) break;
 
         AudioFrame frame;
         mQueueAudioFrame.wait_and_pop(frame);
 
         uint64_t currentTimeStamp = getCurrentMillisecond();
         uint64_t time = frame.pts * frame.timebase * 1000;
-        if (mStartTimeStamp == 0) mStartTimeStamp = currentTimeStamp - time;
+        if ((mStartAudioTimeStamp < 0) && (frame.pts > 0)) mStartAudioTimeStamp = currentTimeStamp - time;
 
         // 判断是否可以播放该帧了(也判断是否需要跳过)
-        if ((mSeekAudioFrameDuration < 0) && ((currentTimeStamp - mStartTimeStamp) < time))
+        if ((mSeekAudioFrameDuration < 0) && ((currentTimeStamp - mStartAudioTimeStamp) < time))
         {
-            uint32_t milliseconds = time - (currentTimeStamp - mStartTimeStamp);
+            uint32_t milliseconds = time - (currentTimeStamp - mStartAudioTimeStamp);
             mCvPlayMedia.wait_for(lockNextFrame, std::chrono::milliseconds(milliseconds));
             continue;
         }
         mQueueAudioFrame.wait_and_pop();
 
-        if (mSeekAudioFrameDuration == frame.pts) mSeekAudioFrameDuration = -1;
+        if (mSeekAudioFrameDuration == frame.pts)
+        {
+            mSeekAudioFrameDuration = -1;
+            mStartAudioTimeStamp = -1;
+        }
 
         if (nullptr == frame.data) continue;
         if (nullptr != mIODevice && mAudioVolume > 0)
         {
-            if (!mMediaPauseFlag && mSeekAudioFrameDuration < 0) mIODevice->write((const char*)frame.data, frame.size);
+            if ((mMediaPlayerStatus != PlayerStatus::STATUS_PAUSE) && mSeekAudioFrameDuration < 0) mIODevice->write((const char*)frame.data, frame.size);
             delete frame.data;
         }
     }
@@ -855,13 +950,12 @@ void WidgetPlayer::listenMediaPlayStatus()
 
     qDebug() << "------------------------------------------------------------ 旧的视频被关闭了 ------------------------------------------------------------";
 
-    if (!mAutoPlayMedia)
+    if (mNextMediaPath.isEmpty())
     {
         // 发送视频结束信号
         emit AppSignal::getInstance()->sgl_thread_finish_play_video();
         return;
     }
-    mAutoPlayMedia = false;
     emit sgl_thread_auto_play_current_media();
 }
 
@@ -943,5 +1037,6 @@ void WidgetPlayer::saveGrabImage()
 
 void WidgetPlayer::slot_thread_auto_play_current_media()
 {
-    play(mMediaPath);
+    play(mNextMediaPath);
+    mNextMediaPath.clear();
 }

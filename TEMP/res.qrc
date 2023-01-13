@@ -1,0 +1,18 @@
+<RCC>
+    <qresource prefix="/">
+        <file>Resource/icon/icon.ico</file>
+        <file>Resource/qss/style.qss</file>
+        <file>Resource/shader/shader.frag</file>
+        <file>Resource/shader/shader.vert</file>
+        <file>Resource/image/volume.svg</file>
+        <file>Resource/image/pause.png</file>
+        <file>Resource/image/play.png</file>
+        <file>Resource/image/play_next.png</file>
+        <file>Resource/image/play_previous.png</file>
+        <file>Resource/image/full_screen.svg</file>
+        <file>Resource/image/error.svg</file>
+        <file>Resource/image/info.svg</file>
+        <file>Resource/image/success.svg</file>
+        <file>Resource/image/media_list.svg</file>
+    </qresource>
+</RCC>
