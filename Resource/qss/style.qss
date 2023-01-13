@@ -215,24 +215,24 @@ QPushButton#btnMediaList
     font-size: 9pt;
     background-color: transparent;
     image: url(:/Resource/image/media_list.svg);
-    max-height: 1.5em;
-    max-width: 1.5em;
-    min-height: 1.5em;
-    min-width: 1.5em;
-    padding: 0.5em;
+    max-height: 1.36em;
+    max-width: 1.36em;
+    min-height: 1.36em;
+    min-width: 1.36em;
+    padding: 0.36em;
     border-radius: 0.3em;
 }
 
 QPushButton#btnMediaList:hover
 {
     background-color: #232323;
-    padding: 0.45em;
+    padding: 0.32em;
 }
 
 QPushButton#btnMediaList:pressed
 {
     background-color: #202020;
-    padding: 0.5em;
+    padding: 0.36em;
 }
 
 /* QSlider */
