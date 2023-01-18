@@ -215,10 +215,10 @@ QPushButton#btnMediaList
     font-size: 9pt;
     background-color: transparent;
     image: url(:/Resource/image/media_list.svg);
-    max-height: 1.36em;
-    max-width: 1.36em;
-    min-height: 1.36em;
-    min-width: 1.36em;
+    max-height: 1.6em;
+    max-width: 1.6em;
+    min-height: 1.6em;
+    min-width: 1.6em;
     padding: 0.36em;
     border-radius: 0.3em;
 }

@@ -398,7 +398,13 @@ void WidgetPlayer::parse(const QString &path)
         return;
     }
 
-    double timebase = 0.0;
+    int32_t duration = formatCtx->duration;
+    double timebase = 1.0 / AV_TIME_BASE;
+
+    // 初始化界面视频时长
+    emit AppSignal::getInstance()->sgl_init_media_duration(duration, timebase);
+
+
     for (unsigned i = 0; i < formatCtx->nb_streams; i++)
     {
         if (formatCtx->streams[i]->codecpar->codec_type == AVMEDIA_TYPE_VIDEO)
@@ -428,17 +434,6 @@ void WidgetPlayer::parse(const QString &path)
                 mPraseThreadFlag = false;
                 return;
             }
-
-            int32_t duration = formatCtx->streams[i]->duration;
-            timebase = (double)formatCtx->streams[i]->time_base.num / formatCtx->streams[i]->time_base.den;
-            if (duration == 0)
-            {
-               duration = formatCtx->duration;
-               timebase = 1.0 / AV_TIME_BASE;
-            }
-
-            // 初始化界面视频时长
-            emit AppSignal::getInstance()->sgl_init_media_duration(duration, timebase);
 
             // 存在视频流，准备播放
             auto funcPlayVideo= std::bind(&WidgetPlayer::playVideoFrame, this);
