@@ -126,6 +126,9 @@ void WidgetMediaControl::slot_thread_current_video_frame_time(int64_t pts, float
 {
     if (mMediaBaseDuration < 0) return;
 
+    // 自动变为播放状态
+    ui->btnPlay->setChecked(true);
+
     if (!mSliderPressed) ui->slider->setValue(pts / mMediaTimeBase * timebase);
 
     uint32_t time = pts * timebase;

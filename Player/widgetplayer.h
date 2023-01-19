@@ -124,11 +124,8 @@ private:
     int64_t mSeekVideoFrameDuration = -1;
     int64_t mSeekAudioFrameDuration = -1;
 
-    // 视频开始播放的时间戳
-    int64_t mStartVideoTimeStamp = -1;
-
-    // 音频开始播放的时间戳
-    int64_t mStartAudioTimeStamp = -1;
+    // 多媒体文件开始播放的时间戳
+    int64_t mStartMediaTimeStamp = -1;
 
     // 视频第一帧的时间戳
     int64_t mBeginVideoPTS = -1;
