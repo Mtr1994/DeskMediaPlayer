@@ -505,7 +505,7 @@ void WidgetPlayer::parse(const QString &path)
             bool flag1 = mMediaPlayerStatus != PlayerStatus::STATUS_PAUSE;
 
             // 限制队列里面帧的个数，太多了会占内存
-            bool flag2 = mQueueVideoFrame.size() < 3;
+            bool flag2 = mQueueVideoFrame.size() < 10;
 
             // 关闭状态
             bool flag3 = mMediaPlayerStatus == PlayerStatus::STATUS_CLOSED;
@@ -663,13 +663,10 @@ void WidgetPlayer::parse(const QString &path)
 
                 frame->pts = frame->best_effort_timestamp;
 
-                bool invalidPTS = frame->pts == AV_NOPTS_VALUE;
-                if (invalidPTS) frame->pts = frame->pkt_dts = 0;
-
                 if (mBeginAudioPTS == AV_NOPTS_VALUE) mBeginAudioPTS = frame->pts;
 
                 // 记录跳转位置
-                if (seekAudioFlag && !invalidPTS)
+                if (seekAudioFlag)
                 {
                     mSeekAudioFrameDuration = frame->pts - mBeginAudioPTS;
                     seekAudioFlag = false;
@@ -688,7 +685,7 @@ void WidgetPlayer::parse(const QString &path)
                     break;
                 }
 
-                AudioFrame audio = { frame->pts - mBeginAudioPTS, bufsize, 0, buf };
+                AudioFrame audio = { frame->pts, bufsize, 0, buf, frame->nb_samples};
                 audio.timebase = (double)codeCtxAudio->pkt_timebase.num / codeCtxAudio->pkt_timebase.den;
                 mQueueAudioFrame.push(audio);
 
@@ -889,14 +886,16 @@ void WidgetPlayer::playAudioFrame()
         mQueueAudioFrame.wait_and_pop(frame);
 
         uint64_t currentTimeStamp = getCurrentMillisecond();
-        uint64_t time = frame.pts * frame.timebase * 1000;
-        if ((mStartAudioTimeStamp < 0) && (frame.pts > 0)) mStartAudioTimeStamp = currentTimeStamp - time;
+        uint64_t time = (frame.pts - mBeginAudioPTS) * frame.timebase * 1000;
+        if (frame.pts == AV_NOPTS_VALUE) time = 0;
+        if ((mStartAudioTimeStamp < 0) && (frame.pts != AV_NOPTS_VALUE)) mStartAudioTimeStamp = currentTimeStamp - time;
 
         // 判断是否可以播放该帧了(也判断是否需要跳过)
         if ((mSeekAudioFrameDuration < 0) && ((currentTimeStamp - mStartAudioTimeStamp) < time))
         {
             uint32_t milliseconds = time - (currentTimeStamp - mStartAudioTimeStamp);
             mCvPlayMedia.wait_for(lockNextFrame, std::chrono::milliseconds(milliseconds));
+            // 这里的休眠可能不准， （Windows 系统下的问题）
             continue;
         }
         mQueueAudioFrame.wait_and_pop();
@@ -912,6 +911,13 @@ void WidgetPlayer::playAudioFrame()
         {
             if ((mMediaPlayerStatus != PlayerStatus::STATUS_PAUSE) && mSeekAudioFrameDuration < 0) mIODevice->write((const char*)frame.data, frame.size);
             delete frame.data;
+        }
+
+        // 如果 PTS 异常，就根据音频播放时间，强制休眠一点时间
+        if (frame.pts == AV_NOPTS_VALUE)
+        {
+            uint64_t milliseconds = 1000.0 * frame.samples / mAudioChannles / mSampleRate;
+            std::this_thread::sleep_for(std::chrono::milliseconds(milliseconds));
         }
     }
 

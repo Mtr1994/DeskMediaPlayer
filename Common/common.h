@@ -17,4 +17,5 @@ typedef struct
     int size;
     double timebase;
     uint8_t* data;
+    int32_t samples;
 } AudioFrame;
